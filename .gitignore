@@ -26,9 +26,15 @@ htmlcov/
 # Logs
 *.log
 
+# PyInstaller builds
+build/
+dist/
+*.spec
+
 # OS & Editor files
 .DS_Store
 Thumbs.db
 desktop.ini
 .vscode/
 .idea/
+

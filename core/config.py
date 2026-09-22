@@ -5,6 +5,7 @@ Handles Safe List folders, Auto-Save preferences, and settings.
 
 import json
 import os
+import sys
 import uuid
 from pathlib import Path
 
@@ -12,8 +13,10 @@ from pathlib import Path
 class ConfigManager:
     def __init__(self, config_path=None):
         if config_path is None:
-            # Save config.json in the current project directory or user home
-            base_dir = Path(__file__).resolve().parent.parent
+            if getattr(sys, "frozen", False):
+                base_dir = Path(sys.executable).parent
+            else:
+                base_dir = Path(__file__).resolve().parent.parent
             self.config_path = base_dir / "config.json"
         else:
             self.config_path = Path(config_path)

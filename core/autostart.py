@@ -42,16 +42,19 @@ def set_autostart(enabled: bool, start_minimized: bool = True) -> bool:
     try:
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, REG_PATH, 0, winreg.KEY_SET_VALUE) as key:
             if enabled:
-                # Find pythonw.exe for windowless background execution
-                python_dir = os.path.dirname(sys.executable)
-                pythonw = os.path.join(python_dir, "pythonw.exe")
-                if not os.path.exists(pythonw):
-                    pythonw = sys.executable
+                if getattr(sys, "frozen", False):
+                    cmd = f'"{sys.executable}"'
+                else:
+                    # Find pythonw.exe for windowless background execution
+                    python_dir = os.path.dirname(sys.executable)
+                    pythonw = os.path.join(python_dir, "pythonw.exe")
+                    if not os.path.exists(pythonw):
+                        pythonw = sys.executable
 
-                project_dir = Path(__file__).resolve().parent.parent
-                main_py = project_dir / "main.py"
+                    project_dir = Path(__file__).resolve().parent.parent
+                    main_py = project_dir / "main.py"
+                    cmd = f'"{pythonw}" "{main_py}"'
 
-                cmd = f'"{pythonw}" "{main_py}"'
                 if start_minimized:
                     cmd += " --minimized"
 

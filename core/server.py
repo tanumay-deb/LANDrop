@@ -10,6 +10,7 @@ import json
 import mimetypes
 import os
 import queue
+import sys
 import time
 import zipfile
 from pathlib import Path
@@ -70,7 +71,10 @@ def get_file_type_category(filename: str, is_dir: bool = False) -> str:
 class LandropServer:
     def __init__(self, port: int = 5000):
         self.port = port
-        self.base_dir = Path(__file__).resolve().parent.parent
+        if getattr(sys, "frozen", False):
+            self.base_dir = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
+        else:
+            self.base_dir = Path(__file__).resolve().parent.parent
         self.template_dir = self.base_dir / "templates"
         self.static_dir = self.base_dir / "static"
 
