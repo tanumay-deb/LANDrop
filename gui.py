@@ -166,26 +166,41 @@ class MainWindow(QMainWindow):
 
         # Apply clean, properly-scaled dark theme
         self.setStyleSheet("""
-            QMainWindow, QWidget {
+            QMainWindow, QWidget#contentWidget {
                 background-color: #080c14;
+            }
+            QWidget {
                 color: #f8fafc;
                 font-family: 'Segoe UI', Arial, sans-serif;
             }
             QScrollArea {
                 border: none;
                 background-color: transparent;
+                background: transparent;
+            }
+            QScrollArea > QWidget > QWidget {
+                background-color: transparent;
+                background: transparent;
             }
             QFrame.card {
                 background-color: #0f172a;
                 border: 1px solid rgba(255, 255, 255, 0.08);
                 border-radius: 12px;
             }
+            QLabel {
+                background-color: transparent;
+                background: transparent;
+            }
             QLabel.card-title {
+                background-color: transparent;
+                background: transparent;
                 font-size: 13px;
                 font-weight: 700;
                 color: #38bdf8;
             }
             QLabel.card-subtitle {
+                background-color: transparent;
+                background: transparent;
                 font-size: 11px;
                 color: #94a3b8;
                 line-height: 1.3;
@@ -306,6 +321,7 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(scroll_area)
 
         content_widget = QWidget()
+        content_widget.setObjectName("contentWidget")
         scroll_area.setWidget(content_widget)
 
         root_layout = QVBoxLayout(content_widget)

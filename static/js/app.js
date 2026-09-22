@@ -84,6 +84,7 @@ document.addEventListener("DOMContentLoaded", () => {
   setupUploadEvents();
   setupSSE();
   setupModalEvents();
+  setupFaqEvents();
 });
 
 // --- Theme Toggle ---
@@ -160,6 +161,11 @@ async function fetchServerInfo() {
     const hostLabel = serverInfo.landrop_url || `${serverInfo.hostname}.local`;
     hostNameDisplay.innerText = hostLabel;
     qrUrlText.innerText = serverInfo.landrop_url || serverInfo.primary_url;
+
+    const faqDirectIp = document.getElementById("faqDirectIpDisplay");
+    if (faqDirectIp && serverInfo.primary_url) {
+      faqDirectIp.innerText = serverInfo.primary_url;
+    }
   } catch (e) {
     hostNameDisplay.innerText = "Offline / Connection Error";
   }
@@ -391,8 +397,23 @@ safeSearchInput.addEventListener("input", (e) => {
 // --- Send to PC (Auto-Save Upload) ---
 
 function setupUploadEvents() {
+  const btnSelectMedia = document.getElementById("btnSelectMedia");
+  const mediaInput = document.getElementById("mediaInput");
+
+  if (btnSelectMedia && mediaInput) {
+    btnSelectMedia.addEventListener("click", () => mediaInput.click());
+    mediaInput.addEventListener("change", () => {
+      if (mediaInput.files.length > 0) {
+        uploadFiles(Array.from(mediaInput.files));
+        mediaInput.value = "";
+      }
+    });
+  }
+
   btnSelectFiles.addEventListener("click", () => fileInput.click());
-  btnSelectFolder.addEventListener("click", () => folderInput.click());
+  if (btnSelectFolder) {
+    btnSelectFolder.addEventListener("click", () => folderInput.click());
+  }
 
   fileInput.addEventListener("change", () => {
     if (fileInput.files.length > 0) {
@@ -758,4 +779,36 @@ async function openPreviewModal(title, category, previewUrl, downloadUrl) {
 
 function escapeHtml(str) {
   return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+// --- Help & Device FAQ Setup ---
+
+function setupFaqEvents() {
+  const faqItems = document.querySelectorAll(".faq-item");
+  faqItems.forEach((item) => {
+    const question = item.querySelector(".faq-question");
+    if (question) {
+      question.addEventListener("click", () => {
+        item.classList.toggle("open");
+      });
+    }
+  });
+
+  const btnFaqNav = document.getElementById("btnFaqNav");
+  if (btnFaqNav) {
+    btnFaqNav.addEventListener("click", () => {
+      const tabBtns = document.querySelectorAll(".tab-btn");
+      const tabPanes = document.querySelectorAll(".tab-pane");
+      tabBtns.forEach((b) => b.classList.remove("active"));
+      tabPanes.forEach((p) => p.classList.remove("active"));
+
+      const faqBtn = document.querySelector('.tab-btn[data-tab="tab-faq"]');
+      const faqPane = document.getElementById("tab-faq");
+      if (faqBtn) faqBtn.classList.add("active");
+      if (faqPane) {
+        faqPane.classList.add("active");
+        faqPane.scrollIntoView({ behavior: "smooth" });
+      }
+    });
+  }
 }

@@ -2,7 +2,9 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <title>LANDrop - Local Wi-Fi File Sharing & Explorer</title>
   <link rel="stylesheet" href="/static/css/style.css" />
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -10,7 +12,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 </head>
 <body class="theme-dark">
-  <!-- Top Floating Navbar -->
+  <!-- Top Sticky Navbar -->
   <header class="navbar">
     <div class="nav-left">
       <div class="logo" onclick="window.location.reload()">
@@ -35,6 +37,14 @@
     </div>
 
     <div class="nav-right">
+      <button class="nav-btn" id="btnFaqNav" title="Connection Help & Device FAQ">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="10"></circle>
+          <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path>
+          <line x1="12" y1="17" x2="12.01" y2="17"></line>
+        </svg>
+        <span class="nav-btn-label">Help</span>
+      </button>
       <button class="nav-btn" id="btnQrModal" title="Show Connection QR">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <rect x="3" y="3" width="7" height="7"></rect>
@@ -44,7 +54,7 @@
         </svg>
         <span class="nav-btn-label">QR</span>
       </button>
-      <button class="nav-btn" id="btnThemeToggle" title="Toggle Light/Dark Theme">
+      <button class="nav-btn icon-only" id="btnThemeToggle" title="Toggle Light/Dark Theme">
         <svg id="themeIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <circle cx="12" cy="12" r="5"></circle>
           <line x1="12" y1="1" x2="12" y2="3"></line>
@@ -60,14 +70,14 @@
     </div>
   </header>
 
-  <!-- Navigation Segmented Tabs -->
-  <div class="tabs-wrapper">
-    <nav class="tabs-nav">
+  <!-- Navigation Segmented Tabs (Desktop: top pill; Mobile: bottom bar) -->
+  <div class="tabs-wrapper" id="tabsWrapper">
+    <nav class="tabs-nav" id="tabsNav">
       <button class="tab-btn active" data-tab="tab-safelist">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
         </svg>
-        <span>Browse PC Folders</span>
+        <span class="tab-label">Browse</span>
         <span class="tab-badge" id="badgeSafeCount">0</span>
       </button>
       <button class="tab-btn" data-tab="tab-upload">
@@ -76,7 +86,7 @@
           <polyline points="17 8 12 3 7 8"></polyline>
           <line x1="12" y1="3" x2="12" y2="15"></line>
         </svg>
-        <span>Send to PC</span>
+        <span class="tab-label">Send</span>
         <span class="tab-badge auto-badge" title="Auto-Save Enabled">AUTO</span>
       </button>
       <button class="tab-btn" data-tab="tab-received">
@@ -84,14 +94,22 @@
           <polyline points="22 12 16 12 14 15 10 15 8 12 2 12"></polyline>
           <path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"></path>
         </svg>
-        <span>Received Files</span>
+        <span class="tab-label">Received</span>
       </button>
       <button class="tab-btn" data-tab="tab-clipboard">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path>
           <rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect>
         </svg>
-        <span>Shared Clipboard</span>
+        <span class="tab-label">Clipboard</span>
+      </button>
+      <button class="tab-btn" data-tab="tab-faq">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="10"></circle>
+          <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path>
+          <line x1="12" y1="17" x2="12.01" y2="17"></line>
+        </svg>
+        <span class="tab-label">Help & FAQ</span>
       </button>
     </nav>
   </div>
@@ -111,21 +129,23 @@
             <select class="folder-selector" id="selectSafeFolder" aria-label="Select Safe Folder">
               <option value="">Loading shared folders...</option>
             </select>
-            <button class="action-btn" id="btnDownloadFolderZip" title="Download current folder as ZIP">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                <polyline points="7 10 12 15 17 10"></polyline>
-                <line x1="12" y1="15" x2="12" y2="3"></line>
-              </svg>
-              <span>Download ZIP</span>
-            </button>
-            <button class="action-btn icon-only" id="btnRefreshSafe" title="Refresh folder">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <polyline points="23 4 23 10 17 10"></polyline>
-                <polyline points="1 20 1 14 7 14"></polyline>
-                <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
-              </svg>
-            </button>
+            <div class="safelist-btn-group">
+              <button class="action-btn" id="btnDownloadFolderZip" title="Download current folder as ZIP">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                  <polyline points="7 10 12 15 17 10"></polyline>
+                  <line x1="12" y1="15" x2="12" y2="3"></line>
+                </svg>
+                <span>Download ZIP</span>
+              </button>
+              <button class="action-btn icon-only" id="btnRefreshSafe" title="Refresh folder">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <polyline points="23 4 23 10 17 10"></polyline>
+                  <polyline points="1 20 1 14 7 14"></polyline>
+                  <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+                </svg>
+              </button>
+            </div>
           </div>
         </div>
 
@@ -143,7 +163,7 @@
           <input type="text" id="safeSearchInput" placeholder="Filter files or folders by name..." />
         </div>
 
-        <!-- Files Grid View -->
+        <!-- File Items Grid / List -->
         <div class="files-container" id="safeFilesContainer">
           <div class="empty-state">
             <div class="empty-state-icon-wrap">
@@ -151,29 +171,35 @@
                 <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
               </svg>
             </div>
-            <p>Select a shared folder above to browse its contents</p>
+            <p>Select a safe folder above to start browsing</p>
+            <span class="empty-state-hint">Folders are added to the Safe List on the host PC app.</span>
           </div>
         </div>
       </div>
     </section>
 
-    <!-- TAB 2: SEND TO PC (AUTO-SAVE) -->
+    <!-- TAB 2: SEND FILES TO PC (AUTO-SAVE) -->
     <section class="tab-pane" id="tab-upload">
       <div class="section-card">
-        <div class="upload-header">
-          <div class="autosave-notice">
-            <span class="notice-icon">✓</span>
-            <div>
-              <strong>Auto-Save Active</strong>
-              <p>Files sent from your device are saved immediately straight to the host computer.</p>
-            </div>
+        <div class="section-header-flex">
+          <div>
+            <h2 class="section-title">Send Files to PC</h2>
+            <p class="section-desc">Files automatically save straight into your PC's folder without prompts</p>
+          </div>
+          <div class="badge-pill auto-pill">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <polyline points="20 6 9 17 4 12"></polyline>
+            </svg>
+            <span>Instant Auto-Save ON</span>
           </div>
         </div>
 
-        <!-- Interactive Dropzone -->
+        <!-- Responsive Touch & Drop Target -->
         <div class="dropzone" id="dropzone">
+          <input type="file" id="mediaInput" accept="image/*,video/*" multiple style="display: none;" />
           <input type="file" id="fileInput" multiple style="display: none;" />
           <input type="file" id="folderInput" webkitdirectory directory multiple style="display: none;" />
+
           <div class="dropzone-icon">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
@@ -181,17 +207,27 @@
               <line x1="12" y1="3" x2="12" y2="15"></line>
             </svg>
           </div>
-          <h3 class="dropzone-title">Drop files here to send to PC</h3>
+          <h3 class="dropzone-title">Upload directly to PC</h3>
           <p class="dropzone-subtitle">Transferred at maximum local Wi-Fi speed (zero internet data used)</p>
+
+          <!-- Mobile-Optimized Action Buttons -->
           <div class="dropzone-btns">
-            <button class="primary-btn" id="btnSelectFiles">
+            <button class="primary-btn" id="btnSelectMedia">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                <circle cx="8.5" cy="8.5" r="1.5"></circle>
+                <polyline points="21 15 16 10 5 21"></polyline>
+              </svg>
+              <span>Photos & Videos</span>
+            </button>
+            <button class="secondary-btn" id="btnSelectFiles">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
                 <polyline points="14 2 14 8 20 8"></polyline>
               </svg>
-              <span>Choose Files</span>
+              <span>Browse Files</span>
             </button>
-            <button class="secondary-btn" id="btnSelectFolder">
+            <button class="secondary-btn desktop-only" id="btnSelectFolder">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
               </svg>
@@ -220,7 +256,7 @@
 
         <!-- Sent Files History List in this session -->
         <div class="sent-history" id="sentHistoryContainer">
-          <h4 class="subheading">Recently Sent to PC</h4>
+          <h4 class="subheading">Recently Sent in this Session</h4>
           <div class="sent-list" id="sentList">
             <div class="empty-sent">No files uploaded yet in this session.</div>
           </div>
@@ -265,7 +301,7 @@
         <div class="section-header-flex">
           <div>
             <h2 class="section-title">Shared Clipboard</h2>
-            <p class="section-desc">Instantly share notes, links, and passwords across PC and phone</p>
+            <p class="section-desc">Instantly share notes, links, and text across PC and phone</p>
           </div>
           <span class="timestamp-badge" id="clipboardUpdatedTime">Never synced</span>
         </div>
@@ -291,6 +327,140 @@
       </div>
     </section>
 
+    <!-- TAB 5: HELP & DEVICE FAQ -->
+    <section class="tab-pane" id="tab-faq">
+      <div class="section-card">
+        <div class="safelist-title-group">
+          <h2 class="section-title">Device Connection Guide & FAQ</h2>
+          <p class="section-desc">Troubleshooting tips for iPhone, Android, Mac, and Windows connecting over Wi-Fi</p>
+        </div>
+
+        <div class="faq-list">
+
+          <!-- FAQ Item 1: HTTP vs HTTPS -->
+          <div class="faq-item open">
+            <div class="faq-question">
+              <div class="faq-q-left">
+                <span class="faq-badge badge-security">Security</span>
+                <h4>Why does this link use http:// instead of https://?</h4>
+              </div>
+              <span class="faq-toggle">▼</span>
+            </div>
+            <div class="faq-answer">
+              <p><strong>You are 100% safe and private.</strong> LANDrop transfers files strictly over your local home Wi-Fi network directly between your devices:</p>
+              <ul class="faq-points">
+                <li><strong>No Internet / Cloud Involved:</strong> Transfers never leave your home Wi-Fi router. Nobody outside your Wi-Fi can see or access your files.</li>
+                <li><strong>Why No HTTPS?:</strong> Official SSL/HTTPS certificates are issued only to public internet domains (like <code>google.com</code>). They cannot be issued for private local router IPs (like <code>192.168.x.x</code>).</li>
+                <li><strong>No False Warnings:</strong> Using a fake/self-signed HTTPS certificate triggers alarming red warning screens on iOS and Android (<em>"Your connection is not private / Attackers might be trying to steal info"</em>). Using clean HTTP avoids these scary false alarms.</li>
+              </ul>
+            </div>
+          </div>
+
+          <!-- FAQ Item 2: iPhone Chrome Stuck Loading -->
+          <div class="faq-item open">
+            <div class="faq-question">
+              <div class="faq-q-left">
+                <span class="faq-badge badge-ios">iPhone & iPad</span>
+                <h4>Chrome on iPhone is stuck loading or won't open</h4>
+              </div>
+              <span class="faq-toggle">▼</span>
+            </div>
+            <div class="faq-answer">
+              <p>Apple iOS restricts third-party browsers like Google Chrome from connecting to local Wi-Fi devices by default. Here is how to fix it in 5 seconds:</p>
+              <div class="fix-box">
+                <div class="fix-step">
+                  <span class="step-num">1</span>
+                  <div><strong>Enable Local Network Permission:</strong> Open iPhone <strong>Settings</strong> &rarr; scroll down to <strong>Chrome</strong> &rarr; turn <strong>Local Network ON</strong> (Green).</div>
+                </div>
+                <div class="fix-step">
+                  <span class="step-num">2</span>
+                  <div><strong>Always Include <code>http://</code>:</strong> If you type <code>192.168.1.11:5000</code>, Chrome auto-switches to <code>https://</code> which hangs. Type explicitly: <code class="code-pill">http://192.168.1.11:5000</code></div>
+                </div>
+                <div class="fix-step">
+                  <span class="step-num">3</span>
+                  <div><strong>Best Solution: Use Safari:</strong> Safari is built into iOS and doesn't suffer from Chrome's restrictions. Open Safari and go to <code class="code-pill">http://landrop.local:5000</code> or <code class="code-pill">http://192.168.1.11:5000</code>.</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- FAQ Item 3: iCloud Private Relay & VPN -->
+          <div class="faq-item">
+            <div class="faq-question">
+              <div class="faq-q-left">
+                <span class="faq-badge badge-ios">iOS / VPN</span>
+                <h4>"This site cannot be reached" or Connection Timed Out</h4>
+              </div>
+              <span class="faq-toggle">▼</span>
+            </div>
+            <div class="faq-answer">
+              <p>If your phone cannot reach your PC at all, check these 3 common network blockers:</p>
+              <ul class="faq-points">
+                <li><strong>iCloud Private Relay:</strong> On iPhone, go to <strong>Settings</strong> &rarr; tap your <strong>Name / Apple ID</strong> &rarr; <strong>iCloud</strong> &rarr; <strong>Private Relay</strong> &rarr; Turn <strong>OFF</strong> temporarily. Private Relay reroutes your traffic through Apple servers, preventing access to your local Wi-Fi.</li>
+                <li><strong>VPN Apps:</strong> If you have any VPN running on your phone or PC (e.g. 1.1.1.1, NordVPN, ExpressVPN), disconnect it while transferring files.</li>
+                <li><strong>Different Wi-Fi / Cellular Data:</strong> Ensure your phone is connected to the exact same Wi-Fi SSID as your PC, not mobile cellular data (5G/LTE).</li>
+              </ul>
+            </div>
+          </div>
+
+          <!-- FAQ Item 4: Android Tips -->
+          <div class="faq-item">
+            <div class="faq-question">
+              <div class="faq-q-left">
+                <span class="faq-badge badge-android">Android</span>
+                <h4>Android phones: "Wi-Fi has no internet" prompt</h4>
+              </div>
+              <span class="faq-toggle">▼</span>
+            </div>
+            <div class="faq-answer">
+              <p>If your router has no active internet connection or slow connectivity, Android may display a prompt:</p>
+              <div class="fix-box">
+                <p>When Android asks <em>"This Wi-Fi network has no internet access. Switch to mobile data?"</em>, always select <strong>"Stay connected to Wi-Fi"</strong>. Otherwise, Android will route all web traffic through mobile 5G/4G, which cannot reach your PC.</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- FAQ Item 5: mDNS vs Direct IP vs Auto-Finder -->
+          <div class="faq-item">
+            <div class="faq-question">
+              <div class="faq-q-left">
+                <span class="faq-badge badge-network">Network</span>
+                <h4>What address should I use to connect?</h4>
+              </div>
+              <span class="faq-toggle">▼</span>
+            </div>
+            <div class="faq-answer">
+              <p>LANDrop offers 3 convenient ways to connect:</p>
+              <ul class="faq-points">
+                <li><strong>Permanent Address (Bookmark this!):</strong> <code class="code-pill">http://landrop.local:5000</code> &mdash; Even when your router changes your PC's IP address, mDNS keeps this URL working permanently on Safari, Mac, and iOS.</li>
+                <li><strong>Direct IP:</strong> <code class="code-pill" id="faqDirectIpDisplay">http://192.168.1.11:5000</code> &mdash; Works on all browsers and platforms without exception.</li>
+                <li><strong>Subnet Auto-Finder:</strong> Visit <code class="code-pill">/finder</code> on any connected device. It sweeps your Wi-Fi subnet in 1 second and redirects you to the PC automatically!</li>
+              </ul>
+            </div>
+          </div>
+
+          <!-- FAQ Item 6: Router AP Isolation -->
+          <div class="faq-item">
+            <div class="faq-question">
+              <div class="faq-q-left">
+                <span class="faq-badge badge-router">Router Settings</span>
+                <h4>Devices are on the same Wi-Fi but still cannot communicate</h4>
+              </div>
+              <span class="faq-toggle">▼</span>
+            </div>
+            <div class="faq-answer">
+              <p>Some Wi-Fi routers have a security feature called <strong>AP Isolation</strong> (or <em>Client Isolation</em> / <em>Guest Wi-Fi</em>):</p>
+              <ul class="faq-points">
+                <li><strong>Guest Wi-Fi:</strong> If your PC is on your main Wi-Fi and your phone is on "Guest Wi-Fi", the router isolates them. Connect both to the main network.</li>
+                <li><strong>AP Isolation:</strong> Log in to your router's admin page (usually <code>192.168.1.1</code>) and ensure "AP Isolation" / "Client Isolation" is turned <strong>Disabled</strong>.</li>
+              </ul>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </section>
+
   </main>
 
   <!-- Media Preview Modal -->
@@ -298,7 +468,7 @@
     <div class="modal-card">
       <div class="modal-header">
         <h3 class="modal-title" id="previewModalTitle">File Preview</h3>
-        <button class="modal-close-btn" id="btnClosePreview">&times;</button>
+        <button class="modal-close-btn" id="btnClosePreview" aria-label="Close Preview">&times;</button>
       </div>
       <div class="modal-body" id="previewModalBody">
         <!-- Injected dynamically: img, video, audio, or pre/code -->
@@ -321,14 +491,15 @@
     <div class="modal-card qr-modal-card">
       <div class="modal-header">
         <h3 class="modal-title">Connection Info</h3>
-        <button class="modal-close-btn" id="btnCloseQr">&times;</button>
+        <button class="modal-close-btn" id="btnCloseQr" aria-label="Close QR">&times;</button>
       </div>
       <div class="modal-body qr-body">
-        <p class="qr-notice">Permanent address (automatically updates if your IP changes):</p>
+        <p class="qr-notice">Permanent local address (auto-updates when IP changes):</p>
         <div class="url-badge" id="qrUrlText">http://landrop.local:5000</div>
         <div class="qr-img-wrap">
           <img id="qrImage" src="/api/qr" alt="Connection QR Code" />
         </div>
+        <p class="qr-subhint">Scan with iPhone Camera or visit on your phone's browser.</p>
       </div>
     </div>
   </div>
