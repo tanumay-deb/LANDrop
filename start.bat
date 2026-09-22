@@ -1,11 +1,9 @@
 @echo off
-title LANDrop - Wi-Fi File Transfer
 cd /d "%~dp0"
-echo Starting LANDrop...
-python main.py
-if %ERRORLEVEL% NEQ 0 (
-    echo.
-    echo An error occurred. Running in headless mode...
-    python main.py --headless
+where.exe pythonw >nul 2>&1
+if %ERRORLEVEL% EQU 0 (
+    start "" pythonw main.py
+) else (
+    start "" python main.py
 )
-pause
+exit
