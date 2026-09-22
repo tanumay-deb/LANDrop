@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>LANDrop - Local Wi-Fi File Sharing & Explorer</title>
+  <link rel="stylesheet" href="/static/css/style.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+</head>
+<body class="theme-dark">
+  <!-- Top Floating Navbar -->
+  <header class="navbar">
+    <div class="nav-left">
+      <div class="logo" onclick="window.location.reload()">
+        <div class="logo-icon-wrap">
+          <svg class="logo-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M5 12.55a11 11 0 0 1 14.08 0"></path>
+            <path d="M1.42 9a16 16 0 0 1 21.16 0"></path>
+            <path d="M8.53 16.11a6 6 0 0 1 6.95 0"></path>
+            <line x1="12" y1="20" x2="12.01" y2="20"></line>
+          </svg>
+        </div>
+        <span class="logo-text">LANDrop</span>
+      </div>
+
+      <div class="host-pill" id="hostPill" title="Click to copy connection address">
+        <div class="status-dot-pulse">
+          <div class="status-dot-ring"></div>
+          <div class="status-dot"></div>
+        </div>
+        <span id="hostNameDisplay">Connecting...</span>
+      </div>
+    </div>
+
+    <div class="nav-right">
+      <button class="nav-btn" id="btnQrModal" title="Show Connection QR">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="3" y="3" width="7" height="7"></rect>
+          <rect x="14" y="3" width="7" height="7"></rect>
+          <rect x="14" y="14" width="7" height="7"></rect>
+          <rect x="3" y="14" width="7" height="7"></rect>
+        </svg>
+        <span class="nav-btn-label">QR</span>
+      </button>
+      <button class="nav-btn" id="btnThemeToggle" title="Toggle Light/Dark Theme">
+        <svg id="themeIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="5"></circle>
+          <line x1="12" y1="1" x2="12" y2="3"></line>
+          <line x1="12" y1="21" x2="12" y2="23"></line>
+          <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+          <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+          <line x1="1" y1="12" x2="3" y2="12"></line>
+          <line x1="21" y1="12" x2="23" y2="12"></line>
+          <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+          <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+        </svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- Navigation Segmented Tabs -->
+  <div class="tabs-wrapper">
+    <nav class="tabs-nav">
+      <button class="tab-btn active" data-tab="tab-safelist">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+        </svg>
+        <span>Browse PC Folders</span>
+        <span class="tab-badge" id="badgeSafeCount">0</span>
+      </button>
+      <button class="tab-btn" data-tab="tab-upload">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+          <polyline points="17 8 12 3 7 8"></polyline>
+          <line x1="12" y1="3" x2="12" y2="15"></line>
+        </svg>
+        <span>Send to PC</span>
+        <span class="tab-badge auto-badge" title="Auto-Save Enabled">AUTO</span>
+      </button>
+      <button class="tab-btn" data-tab="tab-received">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline points="22 12 16 12 14 15 10 15 8 12 2 12"></polyline>
+          <path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"></path>
+        </svg>
+        <span>Received Files</span>
+      </button>
+      <button class="tab-btn" data-tab="tab-clipboard">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path>
+          <rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect>
+        </svg>
+        <span>Shared Clipboard</span>
+      </button>
+    </nav>
+  </div>
+
+  <!-- Main Content Container -->
+  <main class="main-container">
+
+    <!-- TAB 1: BROWSE SAFE LIST FOLDERS -->
+    <section class="tab-pane active" id="tab-safelist">
+      <div class="section-card">
+        <div class="safelist-header">
+          <div class="safelist-title-group">
+            <h2 class="section-title">Safe List Explorer</h2>
+            <p class="section-desc">Browse files and folders exposed by your host computer over Wi-Fi</p>
+          </div>
+          <div class="safelist-actions">
+            <select class="folder-selector" id="selectSafeFolder" aria-label="Select Safe Folder">
+              <option value="">Loading shared folders...</option>
+            </select>
+            <button class="action-btn" id="btnDownloadFolderZip" title="Download current folder as ZIP">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                <polyline points="7 10 12 15 17 10"></polyline>
+                <line x1="12" y1="15" x2="12" y2="3"></line>
+              </svg>
+              <span>Download ZIP</span>
+            </button>
+            <button class="action-btn icon-only" id="btnRefreshSafe" title="Refresh folder">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="23 4 23 10 17 10"></polyline>
+                <polyline points="1 20 1 14 7 14"></polyline>
+                <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <!-- Breadcrumb Navigation Bar -->
+        <div class="breadcrumb-container" id="breadcrumbBar">
+          <span class="breadcrumb-item">Safe List</span>
+        </div>
+
+        <!-- Filter / Search Input -->
+        <div class="search-bar">
+          <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="11" cy="11" r="8"></circle>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+          </svg>
+          <input type="text" id="safeSearchInput" placeholder="Filter files or folders by name..." />
+        </div>
+
+        <!-- Files Grid View -->
+        <div class="files-container" id="safeFilesContainer">
+          <div class="empty-state">
+            <div class="empty-state-icon-wrap">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+              </svg>
+            </div>
+            <p>Select a shared folder above to browse its contents</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 2: SEND TO PC (AUTO-SAVE) -->
+    <section class="tab-pane" id="tab-upload">
+      <div class="section-card">
+        <div class="upload-header">
+          <div class="autosave-notice">
+            <span class="notice-icon">✓</span>
+            <div>
+              <strong>Auto-Save Active</strong>
+              <p>Files sent from your device are saved immediately straight to the host computer.</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Interactive Dropzone -->
+        <div class="dropzone" id="dropzone">
+          <input type="file" id="fileInput" multiple style="display: none;" />
+          <input type="file" id="folderInput" webkitdirectory directory multiple style="display: none;" />
+          <div class="dropzone-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+              <polyline points="17 8 12 3 7 8"></polyline>
+              <line x1="12" y1="3" x2="12" y2="15"></line>
+            </svg>
+          </div>
+          <h3 class="dropzone-title">Drop files here to send to PC</h3>
+          <p class="dropzone-subtitle">Transferred at maximum local Wi-Fi speed (zero internet data used)</p>
+          <div class="dropzone-btns">
+            <button class="primary-btn" id="btnSelectFiles">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                <polyline points="14 2 14 8 20 8"></polyline>
+              </svg>
+              <span>Choose Files</span>
+            </button>
+            <button class="secondary-btn" id="btnSelectFolder">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+              </svg>
+              <span>Choose Folder</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Live Upload Progress Card -->
+        <div class="progress-card hidden" id="uploadProgressCard">
+          <div class="progress-header">
+            <div class="progress-file-info">
+              <span class="progress-filename" id="progressFileName">Uploading...</span>
+              <span class="progress-speed" id="progressSpeed">0 MB/s</span>
+            </div>
+            <span class="progress-pct" id="progressPct">0%</span>
+          </div>
+          <div class="progress-bar-bg">
+            <div class="progress-bar-fill" id="progressBarFill"></div>
+          </div>
+          <div class="progress-meta">
+            <span id="progressTransferred">0 MB / 0 MB</span>
+            <span id="progressEta">ETA: Calculating...</span>
+          </div>
+        </div>
+
+        <!-- Sent Files History List in this session -->
+        <div class="sent-history" id="sentHistoryContainer">
+          <h4 class="subheading">Recently Sent to PC</h4>
+          <div class="sent-list" id="sentList">
+            <div class="empty-sent">No files uploaded yet in this session.</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 3: RECEIVED FILES -->
+    <section class="tab-pane" id="tab-received">
+      <div class="section-card">
+        <div class="section-header-flex">
+          <div>
+            <h2 class="section-title">Received on PC</h2>
+            <p class="section-desc">Auto-saving files to <code class="folder-badge" id="receivedPathDesc">Downloads/LANDrop_Received</code></p>
+          </div>
+          <button class="action-btn icon-only" id="btnRefreshReceived" title="Refresh list">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="23 4 23 10 17 10"></polyline>
+              <polyline points="1 20 1 14 7 14"></polyline>
+              <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+            </svg>
+          </button>
+        </div>
+        <div class="files-container" id="receivedFilesContainer">
+          <div class="empty-state">
+            <div class="empty-state-icon-wrap">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                <polyline points="22 12 16 12 14 15 10 15 8 12 2 12"></polyline>
+                <path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"></path>
+              </svg>
+            </div>
+            <p>No files currently in PC's auto-save directory</p>
+            <span class="empty-state-hint">Files sent from your phone or other devices will show up here automatically.</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 4: SHARED CLIPBOARD -->
+    <section class="tab-pane" id="tab-clipboard">
+      <div class="section-card">
+        <div class="section-header-flex">
+          <div>
+            <h2 class="section-title">Shared Clipboard</h2>
+            <p class="section-desc">Instantly share notes, links, and passwords across PC and phone</p>
+          </div>
+          <span class="timestamp-badge" id="clipboardUpdatedTime">Never synced</span>
+        </div>
+
+        <textarea class="clipboard-box" id="clipboardTextarea" placeholder="Type or paste text here to share across devices instantly..."></textarea>
+
+        <div class="clipboard-actions">
+          <button class="primary-btn" id="btnSendClipboard">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="22" y1="2" x2="11" y2="13"></line>
+              <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+            </svg>
+            <span>Sync to All Devices</span>
+          </button>
+          <button class="secondary-btn" id="btnCopyClipboard">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+            </svg>
+            <span>Copy to My Clipboard</span>
+          </button>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Media Preview Modal -->
+  <div class="modal-backdrop hidden" id="previewModal">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 class="modal-title" id="previewModalTitle">File Preview</h3>
+        <button class="modal-close-btn" id="btnClosePreview">&times;</button>
+      </div>
+      <div class="modal-body" id="previewModalBody">
+        <!-- Injected dynamically: img, video, audio, or pre/code -->
+      </div>
+      <div class="modal-footer">
+        <a class="primary-btn" id="btnModalDownload" download>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="7 10 12 15 17 10"></polyline>
+            <line x1="12" y1="15" x2="12" y2="3"></line>
+          </svg>
+          <span>Download File</span>
+        </a>
+      </div>
+    </div>
+  </div>
+
+  <!-- QR Code Modal -->
+  <div class="modal-backdrop hidden" id="qrModal">
+    <div class="modal-card qr-modal-card">
+      <div class="modal-header">
+        <h3 class="modal-title">Connection Info</h3>
+        <button class="modal-close-btn" id="btnCloseQr">&times;</button>
+      </div>
+      <div class="modal-body qr-body">
+        <p class="qr-notice">Permanent address (automatically updates if your IP changes):</p>
+        <div class="url-badge" id="qrUrlText">http://landrop.local:5000</div>
+        <div class="qr-img-wrap">
+          <img id="qrImage" src="/api/qr" alt="Connection QR Code" />
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notification Container -->
+  <div class="toast-container" id="toastContainer"></div>
+
+  <script src="/static/js/app.js"></script>
+</body>
+</html>
