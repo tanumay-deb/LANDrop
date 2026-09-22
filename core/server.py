@@ -131,10 +131,12 @@ class LandropServer:
 
         @app.route("/")
         def index():
+            self.log_activity(f"Device connected from {request.remote_addr}", "info")
             return render_template("index.html")
 
         @app.route("/finder")
         def finder():
+            self.log_activity(f"Subnet scanner accessed from {request.remote_addr}", "info")
             return render_template("finder.html")
 
         @app.route("/api/info")

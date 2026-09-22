@@ -49,7 +49,10 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-from werkzeug.serving import make_server
+from werkzeug.serving import WSGIRequestHandler, make_server
+
+# Prevent hanging connections from blocking server threads
+WSGIRequestHandler.timeout = 15
 
 from core.autostart import is_autostart_enabled, set_autostart
 from core.config import config

@@ -42,6 +42,8 @@ def run_headless(port: int = 5000):
     server.add_activity_callback(cli_logger)
 
     try:
+        from werkzeug.serving import WSGIRequestHandler
+        WSGIRequestHandler.timeout = 15
         server.app.run(host="0.0.0.0", port=actual_port, threaded=True)
     except KeyboardInterrupt:
         print("\n  Shutting down LANDrop server...")
