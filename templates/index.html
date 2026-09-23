@@ -36,6 +36,11 @@
         </div>
         <span id="hostNameDisplay">Connecting...</span>
       </div>
+
+      <div class="mesh-cluster-pill" id="meshClusterPill" title="Connected Hosts on Wi-Fi" style="display: none;">
+        <span class="mesh-dot"></span>
+        <span id="meshClusterText">1 Host</span>
+      </div>
     </div>
 
     <div class="nav-right">
@@ -202,6 +207,20 @@
               <polyline points="20 6 9 17 4 12"></polyline>
             </svg>
             <span>Instant Auto-Save ON</span>
+          </div>
+        </div>
+
+        <!-- Destination Machine Selector (Appears when >= 1 peer node is online) -->
+        <div class="mesh-destination-bar" id="meshDestinationBar" style="display: none;">
+          <span class="destination-label">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10"></circle>
+              <circle cx="12" cy="12" r="3"></circle>
+            </svg>
+            Target Host:
+          </span>
+          <div class="destination-pills" id="destinationPills">
+            <!-- Dynamically populated e.g. [ 🖥️ PC (Primary) ] [ 💻 Laptop ] [ 🌐 All Hosts ] -->
           </div>
         </div>
 

@@ -99,6 +99,7 @@ class ActivityBridge(QObject):
     new_activity = Signal(str, str)
     update_checked = Signal(dict)
     clipboard_received = Signal(str)
+    mesh_updated = Signal(str, list)
 
 
 class QRDialog(QDialog):
@@ -371,6 +372,8 @@ class MainWindow(QMainWindow):
         self.bridge.new_activity.connect(self._append_log)
         self.bridge.update_checked.connect(self._on_update_checked)
         self.bridge.clipboard_received.connect(self._on_remote_clipboard_received)
+        self.bridge.mesh_updated.connect(self._on_mesh_updated)
+        self.current_mesh_nodes = []
 
         # Clipboard auto-sync tracking state
         self._suppress_clipboard_echo = False
@@ -527,6 +530,51 @@ class MainWindow(QMainWindow):
         conn_layout.addWidget(self.ip_subtext)
 
         root_layout.addWidget(conn_card)
+
+        # ==========================================
+        # 1.5 LAN Mesh & Connected Hosts Card
+        # ==========================================
+        mesh_card = QFrame()
+        mesh_card.setProperty("class", "card")
+        mesh_layout = QVBoxLayout(mesh_card)
+        mesh_layout.setContentsMargins(18, 14, 18, 14)
+        mesh_layout.setSpacing(8)
+
+        mesh_header_row = QHBoxLayout()
+        mesh_title = QLabel("🌐 LAN Mesh & Connected Hosts")
+        mesh_title.setProperty("class", "card-title")
+        mesh_header_row.addWidget(mesh_title)
+
+        self.mesh_role_badge = QLabel("🟢 Primary Leader")
+        self.mesh_role_badge.setStyleSheet("""
+            background-color: rgba(16, 185, 129, 0.12);
+            border: 1px solid rgba(16, 185, 129, 0.35);
+            color: #34d399;
+            padding: 3px 10px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 700;
+        """)
+        mesh_header_row.addWidget(self.mesh_role_badge)
+        mesh_header_row.addStretch()
+
+        self.btn_send_to_node = QPushButton("📤 Send to Peer Host...")
+        self.btn_send_to_node.setStyleSheet("""
+            background-color: rgba(56, 189, 248, 0.12);
+            border: 1px solid rgba(56, 189, 248, 0.35);
+            color: #38bdf8;
+            font-weight: 700;
+            padding: 5px 12px;
+        """)
+        self.btn_send_to_node.clicked.connect(self._send_file_to_node_dialog)
+        mesh_header_row.addWidget(self.btn_send_to_node)
+        mesh_layout.addLayout(mesh_header_row)
+
+        self.mesh_nodes_summary = QLabel("Searching for other LANDrop computers on Wi-Fi...")
+        self.mesh_nodes_summary.setStyleSheet("color: #94a3b8; font-size: 11px;")
+        mesh_layout.addWidget(self.mesh_nodes_summary)
+
+        root_layout.addWidget(mesh_card)
 
         # ==========================================
         # 2. Auto-Save Settings Card
@@ -732,6 +780,11 @@ class MainWindow(QMainWindow):
                 lambda text: self.bridge.clipboard_received.emit(text)
             )
 
+            # Register mesh cluster callback
+            self.server_instance.add_mesh_callback(
+                lambda role, nodes: self.bridge.mesh_updated.emit(role, nodes)
+            )
+
             self.server_thread = ServerThread(self.server_instance.app, "0.0.0.0", actual_port)
             self.server_thread.start()
 
@@ -745,6 +798,13 @@ class MainWindow(QMainWindow):
             self.url_label.setText(urls["primary_url"])
             self.ip_subtext.setText(f"Direct IP: {urls['primary_url']}  •  Permanent: {urls['landrop_url']}  •  Hostname: {urls['mdns_url']}")
             self._append_log(f"Server started on port {actual_port}. Direct IP: {urls['primary_url']}.", "info")
+
+            # Initialize mesh status display
+            if self.server_instance.mesh:
+                self._on_mesh_updated(
+                    self.server_instance.mesh.role,
+                    self.server_instance.mesh.get_nodes_list(),
+                )
 
             # Check for updates in background
             self._check_updates_async(manual=False)
@@ -770,7 +830,8 @@ class MainWindow(QMainWindow):
                 'powershell -Command "Start-Process powershell -ArgumentList \'-Command '
                 '\\\"New-NetFirewallRule -DisplayName \\\'LANDrop Wi-Fi File Transfer\\\' -Direction Inbound -LocalPort 5000 -Protocol TCP -Action Allow; '
                 'New-NetFirewallRule -DisplayName \\\'LANDrop Wi-Fi File Transfer UDP\\\' -Direction Inbound -LocalPort 5000 -Protocol UDP -Action Allow; '
-                'New-NetFirewallRule -DisplayName \\\'LANDrop mDNS Discovery\\\' -Direction Inbound -LocalPort 5353 -Protocol UDP -Action Allow\\\"\' -Verb RunAs"'
+                'New-NetFirewallRule -DisplayName \\\'LANDrop mDNS Discovery\\\' -Direction Inbound -LocalPort 5353 -Protocol UDP -Action Allow; '
+                'New-NetFirewallRule -DisplayName \\\'LANDrop Mesh Peer Discovery\\\' -Direction Inbound -LocalPort 5005 -Protocol UDP -Action Allow\\\"\' -Verb RunAs"'
             )
             os.system(ps_cmd)
             QMessageBox.information(
@@ -848,6 +909,122 @@ class MainWindow(QMainWindow):
         urls = getattr(self, "active_urls", self.url_label.text())
         dlg = QRDialog(urls, self)
         dlg.exec()
+
+    def _on_mesh_updated(self, role: str, nodes: list):
+        """Updates GUI when mesh role changes or nodes join/leave."""
+        self.current_mesh_nodes = nodes or []
+        is_leader = (role == "leader")
+
+        if is_leader:
+            self.mesh_role_badge.setText("🟢 Primary Leader (landrop.local)")
+            self.mesh_role_badge.setStyleSheet("""
+                background-color: rgba(16, 185, 129, 0.12);
+                border: 1px solid rgba(16, 185, 129, 0.35);
+                color: #34d399;
+                padding: 3px 10px;
+                border-radius: 12px;
+                font-size: 11px;
+                font-weight: 700;
+            """)
+        else:
+            leader_node = next((n for n in self.current_mesh_nodes if n.get("is_leader")), None)
+            leader_ip = leader_node.get("ip") if leader_node else "Connected"
+            self.mesh_role_badge.setText(f"🔵 Secondary Node (Leader: {leader_ip})")
+            self.mesh_role_badge.setStyleSheet("""
+                background-color: rgba(56, 189, 248, 0.12);
+                border: 1px solid rgba(56, 189, 248, 0.35);
+                color: #38bdf8;
+                padding: 3px 10px;
+                border-radius: 12px;
+                font-size: 11px;
+                font-weight: 700;
+            """)
+
+        peers = [n for n in self.current_mesh_nodes if not n.get("is_self")]
+        if peers:
+            peer_descs = [f"💻 {p.get('name', 'Peer')} ({p.get('ip')})" for p in peers]
+            self.mesh_nodes_summary.setText(f"Active Cluster ({len(self.current_mesh_nodes)} Hosts Online):  " + "  •  ".join(peer_descs))
+            self.btn_send_to_node.setEnabled(True)
+            self.btn_send_to_node.setText(f"📤 Send to Peer ({len(peers)} Online)...")
+        else:
+            self.mesh_nodes_summary.setText("No other LANDrop computers detected on Wi-Fi yet. (Waiting for peer beacons)")
+            self.btn_send_to_node.setEnabled(False)
+            self.btn_send_to_node.setText("📤 Send to Peer Host (None Online)")
+
+    def _send_file_to_node_dialog(self):
+        """Allows 1-click native file sending from desktop to another running LANDrop computer."""
+        peers = [n for n in getattr(self, "current_mesh_nodes", []) if not n.get("is_self")]
+        if not peers:
+            QMessageBox.information(
+                self,
+                "No Peer Hosts Online",
+                "No secondary LANDrop laptops or PCs are currently detected on your Wi-Fi.\n\n"
+                "Launch LANDrop on another computer and it will appear here automatically!",
+            )
+            return
+
+        target_node = peers[0]
+        if len(peers) > 1:
+            menu = QMenu(self)
+            selected_box = [None]
+            for p in peers:
+                action = menu.addAction(f"💻 {p['name']} ({p['ip']})")
+                action.triggered.connect(lambda checked=False, node=p: selected_box.__setitem__(0, node))
+            menu.exec(self.btn_send_to_node.mapToGlobal(self.btn_send_to_node.rect().bottomLeft()))
+            if not selected_box[0]:
+                return
+            target_node = selected_box[0]
+
+        file_paths, _ = QFileDialog.getOpenFileNames(
+            self,
+            f"Select File(s) to Send to {target_node['name']}",
+            "",
+            "All Files (*.*)",
+        )
+        if not file_paths:
+            return
+
+        target_url = f"{target_node['url']}/api/upload"
+        t = threading.Thread(
+            target=self._send_files_async,
+            args=(target_url, target_node['name'], file_paths),
+            daemon=True,
+        )
+        t.start()
+
+    def _send_files_async(self, upload_url: str, target_name: str, file_paths: list[str]):
+        """Pushes files directly to peer computer using pure Python standard library multipart HTTP."""
+        import urllib.request
+        import uuid
+
+        boundary = f"----LANDropBoundary{uuid.uuid4().hex}"
+        self._append_log(f"Sending {len(file_paths)} file(s) directly to {target_name} ({upload_url})...", "info")
+
+        try:
+            body = bytearray()
+            for fp in file_paths:
+                fname = os.path.basename(fp)
+                body.extend(f"--{boundary}\r\n".encode("utf-8"))
+                body.extend(f'Content-Disposition: form-data; name="files"; filename="{fname}"\r\n'.encode("utf-8"))
+                body.extend(b"Content-Type: application/octet-stream\r\n\r\n")
+                with open(fp, "rb") as f:
+                    body.extend(f.read())
+                body.extend(b"\r\n")
+            body.extend(f"--{boundary}--\r\n".encode("utf-8"))
+
+            req = urllib.request.Request(
+                upload_url,
+                data=body,
+                headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=60.0) as resp:
+                if resp.status == 200:
+                    self._append_log(f"✓ Successfully sent {len(file_paths)} file(s) to {target_name}!", "upload")
+                else:
+                    self._append_log(f"Send failed with HTTP status {resp.status}", "error")
+        except Exception as e:
+            self._append_log(f"Failed sending files to {target_name}: {e}", "error")
 
     def _toggle_autosave(self, checked: bool):
         config.set_auto_save(checked)

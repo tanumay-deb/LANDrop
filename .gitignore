@@ -5,6 +5,7 @@ __pycache__/
 
 # Local configuration & state
 config.json
+downloads.json
 
 # Received files / uploads
 LANDrop_Received/

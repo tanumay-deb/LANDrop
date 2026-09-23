@@ -57,6 +57,8 @@ class TestLandrop(unittest.TestCase):
         self.client = self.app.test_client()
 
     def tearDown(self):
+        if hasattr(self, "server") and self.server:
+            self.server.shutdown()
         import core.server as srv_mod
         srv_mod.config = self.orig_config
         shutil.rmtree(self.test_dir, ignore_errors=True)
@@ -187,6 +189,64 @@ class TestLandrop(unittest.TestCase):
         self.assertEqual(get_res.status_code, 200)
         self.assertEqual(get_res.get_json()["text"], "Wi-Fi transfer secret code: 987654")
 
+    # 8. REST API: Mesh Cluster & Peer Discovery
+    def test_mesh_nodes_api(self):
+        res = self.client.get("/api/mesh/nodes")
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+        self.assertIn("role", data)
+        self.assertIn("nodes", data)
+        self.assertTrue(len(data["nodes"]) >= 1)
+        self.assertTrue(any(n["is_self"] for n in data["nodes"]))
+
+    # 9. REST API: Secondary Node Registration & Heartbeat
+    def test_mesh_node_registration_and_heartbeat(self):
+        reg_res = self.client.post(
+            "/api/mesh/register",
+            json={
+                "node_id": "test_laptop_123",
+                "name": "Deb_Laptop",
+                "ip": "192.168.1.88",
+                "port": 5000,
+            },
+        )
+        self.assertEqual(reg_res.status_code, 200)
+        reg_data = reg_res.get_json()
+        self.assertTrue(reg_data["success"])
+
+        # Check nodes list now includes the registered laptop
+        nodes_res = self.client.get("/api/mesh/nodes")
+        self.assertEqual(nodes_res.status_code, 200)
+        nodes = nodes_res.get_json()["nodes"]
+        node_ids = [n["id"] for n in nodes]
+        self.assertIn("test_laptop_123", node_ids)
+
+        # Heartbeat ping
+        hb_res = self.client.post(
+            "/api/mesh/heartbeat",
+            json={"node_id": "test_laptop_123"},
+        )
+        self.assertEqual(hb_res.status_code, 200)
+        self.assertTrue(hb_res.get_json()["updated"])
+
+    # 10. REST API: Cross-node clipboard propagation
+    def test_mesh_clipboard_sync(self):
+        sync_res = self.client.post(
+            "/api/mesh/clipboard-sync",
+            json={
+                "text": "Cross-device synced text via mesh",
+                "source_node_id": "test_laptop_123",
+            },
+        )
+        self.assertEqual(sync_res.status_code, 200)
+        self.assertTrue(sync_res.get_json()["success"])
+
+        # Verify clipboard on host updated
+        clip_res = self.client.get("/api/clipboard")
+        self.assertEqual(clip_res.status_code, 200)
+        self.assertEqual(clip_res.get_json()["text"], "Cross-device synced text via mesh")
+
 
 if __name__ == "__main__":
     unittest.main()
+

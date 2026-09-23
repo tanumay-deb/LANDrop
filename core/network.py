@@ -136,6 +136,8 @@ class ZeroconfBroadcaster:
                 self.zc.close()
             except Exception:
                 pass
+            self.zc = None
+            self.info = None
 
 
 def generate_qr_png_bytes(url: str) -> bytes:

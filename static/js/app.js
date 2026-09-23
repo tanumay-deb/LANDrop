@@ -10,9 +10,13 @@ let currentSubpath = "";
 let safeItemsCache = [];
 let cachedSafeFolders = [];
 let serverInfo = null;
+let meshNodes = [];
+let selectedTargetNodeId = "self";
 
 // DOM Elements
 const hostNameDisplay = document.getElementById("hostNameDisplay");
+const meshClusterPill = document.getElementById("meshClusterPill");
+const meshClusterText = document.getElementById("meshClusterText");
 const selectSafeFolder = document.getElementById("selectSafeFolder");
 const safeFilesContainer = document.getElementById("safeFilesContainer");
 const breadcrumbBar = document.getElementById("breadcrumbBar");
@@ -25,6 +29,8 @@ const badgeSafeCount = document.getElementById("badgeSafeCount");
 
 // Upload DOM Elements
 const dropzone = document.getElementById("dropzone");
+const meshDestinationBar = document.getElementById("meshDestinationBar");
+const destinationPills = document.getElementById("destinationPills");
 const fileInput = document.getElementById("fileInput");
 const folderInput = document.getElementById("folderInput");
 const btnSelectFiles = document.getElementById("btnSelectFiles");
@@ -87,6 +93,7 @@ document.addEventListener("DOMContentLoaded", () => {
   fetchServerInfo();
   fetchSafeFolders();
   fetchClipboard();
+  fetchMeshNodes();
   setupClipboardSync();
   setupUploadEvents();
   setupSSE();
@@ -654,10 +661,115 @@ function formatBytes(bytes) {
   return (bytes / (1024 * 1024 * 1024)).toFixed(2) + " GB";
 }
 
+// --- Multi-Host Mesh Node Management ---
+
+async function fetchMeshNodes() {
+  try {
+    const res = await fetch("/api/mesh/nodes");
+    if (!res.ok) return;
+    const data = await res.json();
+    meshNodes = data.nodes || [];
+    renderMeshNodesUI(data.role, meshNodes);
+  } catch (e) {
+    console.error("Error fetching mesh nodes:", e);
+  }
+}
+
+function renderMeshNodesUI(role, nodes) {
+  if (!meshClusterPill || !meshDestinationBar || !destinationPills) return;
+
+  if (nodes && nodes.length > 1) {
+    meshClusterPill.style.display = "inline-flex";
+    meshClusterText.innerText = `${nodes.length} Hosts Connected`;
+    meshDestinationBar.style.display = "flex";
+
+    destinationPills.innerHTML = "";
+
+    nodes.forEach((node) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      const isSelected =
+        selectedTargetNodeId === node.id ||
+        (selectedTargetNodeId === "self" && node.is_self);
+      btn.className = "dest-pill" + (isSelected ? " active" : "");
+
+      const icon = node.name.toLowerCase().includes("laptop") ? "💻" : "🖥️";
+      const badgeText = node.is_self
+        ? node.is_leader
+          ? "Primary Host"
+          : "This Host"
+        : node.is_leader
+        ? "Leader"
+        : "Satellite";
+
+      btn.innerHTML = `<span>${icon} ${node.name}</span> <span class="dest-badge">${badgeText}</span>`;
+      btn.addEventListener("click", () => {
+        selectedTargetNodeId = node.id;
+        document
+          .querySelectorAll(".dest-pill")
+          .forEach((p) => p.classList.remove("active"));
+        btn.classList.add("active");
+        showToast(`Send destination set to: ${node.name}`, "info");
+      });
+      destinationPills.appendChild(btn);
+    });
+
+    // "All Hosts" Multi-Cast pill
+    const allBtn = document.createElement("button");
+    allBtn.type = "button";
+    allBtn.className =
+      "dest-pill" + (selectedTargetNodeId === "all" ? " active" : "");
+    allBtn.innerHTML = `<span>🌐 All Hosts</span> <span class="dest-badge">Multi-Cast</span>`;
+    allBtn.addEventListener("click", () => {
+      selectedTargetNodeId = "all";
+      document
+        .querySelectorAll(".dest-pill")
+        .forEach((p) => p.classList.remove("active"));
+      allBtn.classList.add("active");
+      showToast("Send destination set to: ALL connected hosts", "info");
+    });
+    destinationPills.appendChild(allBtn);
+  } else {
+    meshClusterPill.style.display = "none";
+    meshDestinationBar.style.display = "none";
+    selectedTargetNodeId = "self";
+  }
+}
+
+// --- Send Files (Auto-Save Upload) ---
+
 function uploadFiles(files) {
   if (!files || files.length === 0) return;
 
-  uploadProgressCard.classList.remove("hidden");
+  let targets = [];
+  if (selectedTargetNodeId === "all" && meshNodes.length > 0) {
+    targets = meshNodes.map((n) => ({
+      url: `${n.url}/api/upload`,
+      name: n.name,
+    }));
+  } else if (selectedTargetNodeId !== "self" && meshNodes.length > 0) {
+    const targetNode = meshNodes.find((n) => n.id === selectedTargetNodeId);
+    if (targetNode) {
+      targets = [{ url: `${targetNode.url}/api/upload`, name: targetNode.name }];
+    } else {
+      targets = [{ url: "/api/upload", name: "host PC" }];
+    }
+  } else {
+    targets = [{ url: "/api/upload", name: "host PC" }];
+  }
+
+  targets.forEach((target, index) => {
+    executeUpload(files, target.url, target.name, index === 0);
+  });
+}
+
+function executeUpload(files, uploadUrl, targetName, showProgressUI) {
+  if (showProgressUI) {
+    uploadProgressCard.classList.remove("hidden");
+    progressBarFill.style.width = "0%";
+    progressPct.innerText = "0%";
+  }
+
   const formData = new FormData();
   let totalBytes = 0;
 
@@ -666,16 +778,19 @@ function uploadFiles(files) {
     totalBytes += f.size;
   });
 
-  const label = files.length === 1 ? files[0].name : `${files.length} files (${formatBytes(totalBytes)})`;
-  progressFileName.innerText = label;
-  progressBarFill.style.width = "0%";
-  progressPct.innerText = "0%";
+  const label =
+    files.length === 1
+      ? files[0].name
+      : `${files.length} files (${formatBytes(totalBytes)})`;
+  if (showProgressUI) {
+    progressFileName.innerText = `${label} ➔ ${targetName}`;
+  }
 
   const startTime = Date.now();
   const xhr = new XMLHttpRequest();
 
   xhr.upload.addEventListener("progress", (e) => {
-    if (e.lengthComputable) {
+    if (e.lengthComputable && showProgressUI) {
       const pct = Math.round((e.loaded / e.total) * 100);
       progressBarFill.style.width = pct + "%";
       progressPct.innerText = pct + "%";
@@ -683,7 +798,8 @@ function uploadFiles(files) {
       const elapsedSec = (Date.now() - startTime) / 1000;
       if (elapsedSec > 0.3) {
         const bytesPerSec = e.loaded / elapsedSec;
-        progressSpeed.innerText = `${formatBytes(bytesPerSec)}/s`;
+        const mbps = ((bytesPerSec * 8) / (1024 * 1024)).toFixed(0);
+        progressSpeed.innerText = `${formatBytes(bytesPerSec)}/s (${mbps} Mbps)`;
         const remainingBytes = e.total - e.loaded;
         const etaSec = Math.round(remainingBytes / bytesPerSec);
         progressEta.innerText = `ETA: ${etaSec}s`;
@@ -695,34 +811,39 @@ function uploadFiles(files) {
   xhr.addEventListener("load", () => {
     if (xhr.status >= 200 && xhr.status < 300) {
       const resp = JSON.parse(xhr.responseText);
-      showToast(`✓ Auto-saved ${resp.saved_count} file(s) to PC!`, "success");
-      progressBarFill.style.width = "100%";
-      progressPct.innerText = "100%";
-      progressSpeed.innerText = "Completed";
-      progressEta.innerText = "Auto-saved to host PC";
+      showToast(
+        `✓ Auto-saved ${resp.saved_count} file(s) to ${targetName}! Available in 'Received'.`,
+        "success"
+      );
 
-      // Append to sent history list
-      if (resp.saved_files) {
-        resp.saved_files.forEach((sf) => addSentHistoryItem(sf));
+      if (showProgressUI) {
+        progressBarFill.style.width = "100%";
+        progressPct.innerText = "100%";
+        progressSpeed.innerText = "Completed";
+        progressEta.innerText = `Auto-saved to ${targetName}`;
+
+        if (resp.saved_files) {
+          resp.saved_files.forEach((sf) => addSentHistoryItem(sf));
+        }
+
+        setTimeout(() => {
+          uploadProgressCard.classList.add("hidden");
+        }, 3500);
+
+        fetchReceivedFiles();
       }
-
-      setTimeout(() => {
-        uploadProgressCard.classList.add("hidden");
-      }, 3500);
-
-      fetchReceivedFiles();
     } else {
-      showToast("Upload failed: " + xhr.statusText, "error");
-      progressSpeed.innerText = "Failed";
+      showToast(`Upload failed to ${targetName}: ` + xhr.statusText, "error");
+      if (showProgressUI) progressSpeed.innerText = "Failed";
     }
   });
 
   xhr.addEventListener("error", () => {
-    showToast("Network error during upload", "error");
-    progressSpeed.innerText = "Network Error";
+    showToast(`Network error uploading to ${targetName}`, "error");
+    if (showProgressUI) progressSpeed.innerText = "Network Error";
   });
 
-  xhr.open("POST", "/api/upload");
+  xhr.open("POST", uploadUrl);
   xhr.send(formData);
 }
 
@@ -999,6 +1120,15 @@ function setupSSE() {
             navigator.clipboard.writeText(data.text).catch(() => {});
           }
         }
+      } else if (data.type === "mesh_nodes_changed") {
+        if (data.nodes) {
+          meshNodes = data.nodes;
+          renderMeshNodesUI(serverInfo ? serverInfo.mesh_role : "leader", meshNodes);
+        } else {
+          fetchMeshNodes();
+        }
+      } else if (data.type === "mesh_role_changed") {
+        fetchMeshNodes();
       }
     } catch (err) {
       // heartbeats or non-json messages

@@ -14,10 +14,12 @@ echo Adding permanent Windows Firewall rules for LANDrop (Port 5000 ^& mDNS)...
 netsh advfirewall firewall delete rule name="LANDrop Wi-Fi File Transfer" >nul 2>&1
 netsh advfirewall firewall delete rule name="LANDrop Wi-Fi File Transfer UDP" >nul 2>&1
 netsh advfirewall firewall delete rule name="LANDrop mDNS Discovery" >nul 2>&1
+netsh advfirewall firewall delete rule name="LANDrop Mesh Peer Discovery" >nul 2>&1
 
 netsh advfirewall firewall add rule name="LANDrop Wi-Fi File Transfer" dir=in action=allow protocol=TCP localport=5000 profile=any
 netsh advfirewall firewall add rule name="LANDrop Wi-Fi File Transfer UDP" dir=in action=allow protocol=UDP localport=5000 profile=any
 netsh advfirewall firewall add rule name="LANDrop mDNS Discovery" dir=in action=allow protocol=UDP localport=5353 profile=any
+netsh advfirewall firewall add rule name="LANDrop Mesh Peer Discovery" dir=in action=allow protocol=UDP localport=5005 profile=any
 
 echo.
 echo ========================================================

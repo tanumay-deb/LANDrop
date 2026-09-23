@@ -12,6 +12,7 @@
 - **🔒 Safe List Folder Explorer**: Choose specific folders on your computer to share. Remote devices can browse subfolders, view files with breadcrumbs, preview media, and download single files or whole directories as a ZIP.
 - **📥 Instant Auto-Save**: Incoming files from phones/tablets are **automatically saved** straight to your designated folder (`Downloads/LANDrop_Received`) with automatic duplicate protection (`photo (1).jpg`).
 - **📋 Cross-Device Shared Clipboard**: Seamlessly copy/paste links, notes, and text between PC and mobile with 1-tap copy.
+- **🌐 Leader-Follower Mesh Cluster**: Running LANDrop on both your PC and Laptop? They automatically discover each other on your Wi-Fi! The first computer acts as the **Primary Leader** (`landrop.local`), while the second joins as a **Secondary Node (Satellite)**. Phones and tablets connect to a single unified portal, pick the destination computer with 1 tap (`[ PC ] [ Laptop ] [ All Hosts ]`), and text copied anywhere syncs across all computer clipboards!
 - **🚀 Maximum LAN Speed**: Uses direct Wi-Fi local network bandwidth (30–100+ MB/s). No cloud servers, no file size caps, zero data usage.
 - **🖥️ Dual Mode**: Sleek native Windows Desktop GUI (with system tray minimize) or Headless CLI (`--headless`).
 

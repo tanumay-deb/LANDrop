@@ -25,6 +25,7 @@ from flask import (
 from flask_cors import CORS
 
 from core.config import config
+from core.mesh import MeshManager
 from core.network import (
     ZeroconfBroadcaster,
     generate_qr_png_bytes,
@@ -70,7 +71,7 @@ def get_file_type_category(filename: str, is_dir: bool = False) -> str:
 
 
 class LandropServer:
-    def __init__(self, port: int = 5000):
+    def __init__(self, port: int = 5000, enable_mesh: bool = True):
         self.port = port
         if getattr(sys, "frozen", False):
             self.base_dir = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
@@ -86,10 +87,6 @@ class LandropServer:
         )
         CORS(self.app)
 
-        # Start Zeroconf mDNS broadcaster for permanent landrop.local address
-        self.broadcaster = ZeroconfBroadcaster(name="landrop", port=self.port)
-        self.broadcaster.start()
-
         # In-memory shared state
         self.clipboard_content = ""
         self.clipboard_updated_at = None
@@ -97,16 +94,94 @@ class LandropServer:
         self.event_subscribers: list[queue.Queue] = []
         self.activity_callbacks = []
         self.clipboard_callbacks = []
+        self.mesh_callbacks = []
+
+        # Mesh / Cluster management
+        self.enable_mesh = enable_mesh
+        self.mesh: Optional[MeshManager] = None
+        if self.enable_mesh:
+            self.mesh = MeshManager(
+                port=self.port,
+                on_role_change=self._on_mesh_role_change,
+                on_nodes_change=self._on_mesh_nodes_change,
+                on_remote_clipboard=self._on_mesh_clipboard_received,
+            )
+            self.mesh.start()
+
+        # Zeroconf mDNS broadcaster for permanent landrop.local address
+        # Only advertise landrop.local if Primary Leader (prevents mDNS name collisions)
+        self.broadcaster = ZeroconfBroadcaster(name="landrop", port=self.port)
+        if not self.mesh or self.mesh.role == "leader":
+            self.broadcaster.start()
 
         self._register_routes()
 
     def shutdown(self):
         """Stops background workers and unregisters mDNS services."""
+        if hasattr(self, "mesh") and self.mesh:
+            try:
+                self.mesh.stop()
+            except Exception:
+                pass
         if hasattr(self, "broadcaster") and self.broadcaster:
             try:
                 self.broadcaster.stop()
             except Exception:
                 pass
+
+    def add_mesh_callback(self, callback):
+        """Registers a callback for desktop GUI cluster status updates."""
+        self.mesh_callbacks.append(callback)
+
+    def _on_mesh_role_change(self, role: str):
+        """Triggered when role transitions between LEADER and NODE."""
+        self.log_activity(f"Mesh role established: {role.upper()}", "info")
+        if role == "leader":
+            if hasattr(self, "broadcaster") and self.broadcaster and not self.broadcaster.zc:
+                self.broadcaster.start()
+        elif role == "node":
+            if hasattr(self, "broadcaster") and self.broadcaster and self.broadcaster.zc:
+                self.broadcaster.stop()
+
+        self.broadcast_event({
+            "type": "mesh_role_changed",
+            "role": role,
+            "nodes": self.mesh.get_nodes_list() if self.mesh else [],
+        })
+        for cb in self.mesh_callbacks:
+            try:
+                cb(role, self.mesh.get_nodes_list() if self.mesh else [])
+            except Exception:
+                pass
+
+    def _on_mesh_nodes_change(self, nodes: list):
+        """Triggered when cluster nodes join, leave, or update."""
+        self.broadcast_event({
+            "type": "mesh_nodes_changed",
+            "nodes": nodes,
+        })
+        role = self.mesh.role if self.mesh else "leader"
+        for cb in self.mesh_callbacks:
+            try:
+                cb(role, nodes)
+            except Exception:
+                pass
+
+    def _on_mesh_clipboard_received(self, text: str):
+        """Triggered when clipboard text is received from peer mesh node."""
+        if text and text != self.clipboard_content:
+            self.clipboard_content = text
+            self.clipboard_updated_at = datetime.datetime.now().strftime("%H:%M:%S")
+            self.broadcast_event({
+                "type": "clipboard_updated",
+                "text": text,
+                "updated_at": self.clipboard_updated_at,
+            })
+            for cb in self.clipboard_callbacks:
+                try:
+                    cb(text)
+                except Exception:
+                    pass
 
     def add_activity_callback(self, callback):
         """Registers a callback for desktop GUI activity logging."""
@@ -167,6 +242,8 @@ class LandropServer:
                 "safe_folders_count": len(safe_folders),
                 "has_clipboard": bool(self.clipboard_content),
                 "version": APP_VERSION,
+                "mesh_role": self.mesh.role if self.mesh else "standalone",
+                "mesh_nodes": self.mesh.get_nodes_list() if self.mesh else [],
             })
 
         @app.route("/api/version")
@@ -487,6 +564,9 @@ class LandropServer:
                     "updated_at": self.clipboard_updated_at,
                 })
 
+                if self.mesh:
+                    self.mesh.broadcast_clipboard_mesh(text)
+
                 for cb in self.clipboard_callbacks:
                     try:
                         cb(self.clipboard_content)
@@ -499,6 +579,83 @@ class LandropServer:
                 "text": self.clipboard_content,
                 "updated_at": self.clipboard_updated_at,
             })
+
+        # --- Mesh / Cluster Endpoints ---
+
+        @app.route("/api/mesh/nodes")
+        def api_mesh_nodes():
+            """Returns list of all active cluster nodes."""
+            if not self.mesh:
+                return jsonify({"role": "standalone", "nodes": []})
+            return jsonify({
+                "role": self.mesh.role,
+                "nodes": self.mesh.get_nodes_list(),
+            })
+
+        @app.route("/api/mesh/register", methods=["POST"])
+        def api_mesh_register():
+            """Secondary nodes register with Primary Leader."""
+            data = request.get_json(silent=True) or {}
+            if not data.get("node_id") or not data.get("ip"):
+                return jsonify({"error": "Invalid node registration data"}), 400
+
+            if self.mesh:
+                self.mesh.register_node(data)
+                self.log_activity(f"Secondary Node joined cluster: {data.get('name')} ({data.get('ip')})", "info")
+                self.broadcast_event({
+                    "type": "mesh_nodes_changed",
+                    "nodes": self.mesh.get_nodes_list(),
+                })
+                return jsonify({
+                    "success": True,
+                    "leader_name": self.mesh.device_name,
+                    "leader_role": self.mesh.role,
+                })
+            return jsonify({"error": "Mesh not enabled on host"}), 503
+
+        @app.route("/api/mesh/heartbeat", methods=["POST"])
+        def api_mesh_heartbeat():
+            """Heartbeat ping from active secondary nodes."""
+            data = request.get_json(silent=True) or {}
+            node_id = data.get("node_id")
+            if not node_id:
+                return jsonify({"error": "Missing node_id"}), 400
+
+            if self.mesh:
+                updated = self.mesh.update_heartbeat(node_id)
+                return jsonify({"status": "ok", "updated": updated})
+            return jsonify({"error": "Mesh not enabled"}), 503
+
+        @app.route("/api/mesh/clipboard-sync", methods=["POST"])
+        def api_mesh_clipboard_sync():
+            """Receives cross-node clipboard update."""
+            data = request.get_json(silent=True) or {}
+            text = data.get("text", "")
+            source_node_id = data.get("source_node_id")
+
+            if text and text != self.clipboard_content:
+                self.clipboard_content = text
+                self.clipboard_updated_at = datetime.datetime.now().strftime("%H:%M:%S")
+                snippet = (text[:30] + "...") if len(text) > 30 else text
+                self.log_activity(f"Clipboard synced from peer host: '{snippet}'", "info")
+
+                self.broadcast_event({
+                    "type": "clipboard_updated",
+                    "text": text,
+                    "updated_at": self.clipboard_updated_at,
+                })
+
+                for cb in self.clipboard_callbacks:
+                    try:
+                        cb(text)
+                    except Exception:
+                        pass
+
+                # If Leader, forward to other secondary nodes
+                if self.mesh and self.mesh.role == "leader":
+                    self.mesh.broadcast_clipboard_mesh(text, source_node_id=source_node_id)
+
+            return jsonify({"success": True})
 
         # --- Real-Time SSE Stream ---
 
