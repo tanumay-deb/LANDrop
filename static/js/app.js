@@ -46,8 +46,11 @@ const btnRefreshReceived = document.getElementById("btnRefreshReceived");
 // Clipboard DOM Elements
 const clipboardTextarea = document.getElementById("clipboardTextarea");
 const btnSendClipboard = document.getElementById("btnSendClipboard");
+const btnSendClipboardLabel = document.getElementById("btnSendClipboardLabel");
 const btnCopyClipboard = document.getElementById("btnCopyClipboard");
 const clipboardUpdatedTime = document.getElementById("clipboardUpdatedTime");
+const chkKeepSyncingClipboard = document.getElementById("chkKeepSyncingClipboard");
+const syncLiveStatus = document.getElementById("syncLiveStatus");
 
 // Modals DOM Elements
 const previewModal = document.getElementById("previewModal");
@@ -84,6 +87,7 @@ document.addEventListener("DOMContentLoaded", () => {
   fetchServerInfo();
   fetchSafeFolders();
   fetchClipboard();
+  setupClipboardSync();
   setupUploadEvents();
   setupSSE();
   setupModalEvents();
@@ -838,13 +842,106 @@ function renderReceivedFiles(files) {
 
 // --- Shared Clipboard ---
 
+let clipboardDebounceTimer = null;
+let isUpdatingFromSSE = false;
+
+function setupClipboardSync() {
+  if (!chkKeepSyncingClipboard) return;
+
+  // Restore saved preference (defaults to true)
+  const savedAutoSync = localStorage.getItem("landrop_keep_syncing_clipboard");
+  const isAutoSync = savedAutoSync !== null ? savedAutoSync === "1" : true;
+  chkKeepSyncingClipboard.checked = isAutoSync;
+  updateClipboardSyncUI(isAutoSync);
+
+  chkKeepSyncingClipboard.addEventListener("change", () => {
+    const active = chkKeepSyncingClipboard.checked;
+    localStorage.setItem("landrop_keep_syncing_clipboard", active ? "1" : "0");
+    updateClipboardSyncUI(active);
+
+    if (active) {
+      // Sync current text immediately on turning on
+      if (clipboardTextarea.value.trim()) {
+        sendClipboardData(clipboardTextarea.value, false);
+      }
+      showToast("✓ Live clipboard auto-sync enabled", "info");
+    } else {
+      showToast("Clipboard auto-sync paused (manual sync mode)", "info");
+    }
+  });
+
+  // Continuous auto-sync on typing or pasting (no button click needed)
+  clipboardTextarea.addEventListener("input", () => {
+    if (!chkKeepSyncingClipboard.checked || isUpdatingFromSSE) return;
+
+    if (syncLiveStatus) {
+      syncLiveStatus.className = "sync-live-status syncing";
+      syncLiveStatus.innerText = "● Syncing...";
+    }
+
+    clearTimeout(clipboardDebounceTimer);
+    clipboardDebounceTimer = setTimeout(() => {
+      sendClipboardData(clipboardTextarea.value, false);
+    }, 350);
+  });
+
+  // Re-sync whenever user switches back to this browser tab
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible" && chkKeepSyncingClipboard.checked) {
+      fetchClipboard();
+    }
+  });
+}
+
+function updateClipboardSyncUI(active) {
+  if (!syncLiveStatus) return;
+  if (active) {
+    syncLiveStatus.className = "sync-live-status";
+    syncLiveStatus.innerText = "● Auto-Sync Active";
+    if (btnSendClipboardLabel) btnSendClipboardLabel.innerText = "Synced (Auto)";
+  } else {
+    syncLiveStatus.className = "sync-live-status disabled";
+    syncLiveStatus.innerText = "○ Manual Sync Mode";
+    if (btnSendClipboardLabel) btnSendClipboardLabel.innerText = "Sync Now";
+  }
+}
+
+async function sendClipboardData(text, showToastNotification = true) {
+  try {
+    const res = await fetch("/api/clipboard", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
+    });
+    if (res.ok) {
+      if (syncLiveStatus && chkKeepSyncingClipboard && chkKeepSyncingClipboard.checked) {
+        syncLiveStatus.className = "sync-live-status";
+        syncLiveStatus.innerText = "● Auto-Sync Active";
+      }
+      if (showToastNotification) {
+        showToast("✓ Clipboard synced to PC & all devices!", "success");
+      }
+    }
+  } catch (e) {
+    if (syncLiveStatus) {
+      syncLiveStatus.className = "sync-live-status disabled";
+      syncLiveStatus.innerText = "⚠️ Sync Error";
+    }
+    if (showToastNotification) {
+      showToast("Failed to sync clipboard", "error");
+    }
+  }
+}
+
 async function fetchClipboard() {
   try {
     const res = await fetch("/api/clipboard");
     if (!res.ok) return;
     const data = await res.json();
     if (data.text !== undefined && data.text !== clipboardTextarea.value) {
+      isUpdatingFromSSE = true;
       clipboardTextarea.value = data.text;
+      isUpdatingFromSSE = false;
     }
     if (data.updated_at) {
       clipboardUpdatedTime.innerText = `Last synced: ${data.updated_at}`;
@@ -854,20 +951,8 @@ async function fetchClipboard() {
   }
 }
 
-btnSendClipboard.addEventListener("click", async () => {
-  const text = clipboardTextarea.value;
-  try {
-    const res = await fetch("/api/clipboard", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text }),
-    });
-    if (res.ok) {
-      showToast("✓ Clipboard synced to PC & all devices!", "success");
-    }
-  } catch (e) {
-    showToast("Failed to sync clipboard", "error");
-  }
+btnSendClipboard.addEventListener("click", () => {
+  sendClipboardData(clipboardTextarea.value, true);
 });
 
 btnCopyClipboard.addEventListener("click", async () => {
@@ -901,8 +986,19 @@ function setupSSE() {
         showToast(`Incoming file auto-saved: ${data.file.filename}`, "info");
         fetchReceivedFiles();
       } else if (data.type === "clipboard_updated") {
-        clipboardTextarea.value = data.text;
+        if (data.text !== clipboardTextarea.value) {
+          isUpdatingFromSSE = true;
+          clipboardTextarea.value = data.text;
+          isUpdatingFromSSE = false;
+        }
         clipboardUpdatedTime.innerText = `Synced just now (${data.updated_at})`;
+
+        // Auto-copy to device clipboard if keep syncing is enabled and window has focus
+        if (chkKeepSyncingClipboard && chkKeepSyncingClipboard.checked) {
+          if (navigator.clipboard && document.hasFocus()) {
+            navigator.clipboard.writeText(data.text).catch(() => {});
+          }
+        }
       }
     } catch (err) {
       // heartbeats or non-json messages

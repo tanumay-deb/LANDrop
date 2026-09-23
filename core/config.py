@@ -74,6 +74,14 @@ class ConfigManager:
         self.save()
 
     @property
+    def clipboard_sync_enabled(self) -> bool:
+        return bool(self.data.get("clipboard_sync", True))
+
+    def set_clipboard_sync(self, enabled: bool):
+        self.data["clipboard_sync"] = bool(enabled)
+        self.save()
+
+    @property
     def save_directory(self) -> str:
         return self.data.get("save_directory", self.default_save_dir)
 

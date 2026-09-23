@@ -98,6 +98,7 @@ class ActivityBridge(QObject):
     """Bridge for thread-safe UI updates from Flask server to Qt."""
     new_activity = Signal(str, str)
     update_checked = Signal(dict)
+    clipboard_received = Signal(str)
 
 
 class QRDialog(QDialog):
@@ -369,6 +370,12 @@ class MainWindow(QMainWindow):
         self.bridge = ActivityBridge()
         self.bridge.new_activity.connect(self._append_log)
         self.bridge.update_checked.connect(self._on_update_checked)
+        self.bridge.clipboard_received.connect(self._on_remote_clipboard_received)
+
+        # Clipboard auto-sync tracking state
+        self._suppress_clipboard_echo = False
+        self._last_synced_clipboard = ""
+        QApplication.clipboard().dataChanged.connect(self._on_local_clipboard_changed)
 
         # Server setup
         self.server_thread = None
@@ -542,7 +549,12 @@ class MainWindow(QMainWindow):
         self.chk_autosave.toggled.connect(self._toggle_autosave)
         options_row.addWidget(self.chk_autosave)
 
-        self.chk_autostart = QCheckBox("Start with Windows on system boot (silent in tray)")
+        self.chk_clipboard_sync = QCheckBox("Keep syncing clipboard automatically")
+        self.chk_clipboard_sync.setChecked(config.clipboard_sync_enabled)
+        self.chk_clipboard_sync.toggled.connect(self._toggle_clipboard_sync)
+        options_row.addWidget(self.chk_clipboard_sync)
+
+        self.chk_autostart = QCheckBox("Start with Windows")
         self.chk_autostart.setChecked(is_autostart_enabled())
         self.chk_autostart.toggled.connect(self._toggle_autostart)
         options_row.addWidget(self.chk_autostart)
@@ -715,6 +727,11 @@ class MainWindow(QMainWindow):
                 lambda msg, etype: self.bridge.new_activity.emit(msg, etype)
             )
 
+            # Register remote clipboard callback
+            self.server_instance.add_clipboard_callback(
+                lambda text: self.bridge.clipboard_received.emit(text)
+            )
+
             self.server_thread = ServerThread(self.server_instance.app, "0.0.0.0", actual_port)
             self.server_thread.start()
 
@@ -836,6 +853,57 @@ class MainWindow(QMainWindow):
         config.set_auto_save(checked)
         state_str = "ENABLED" if checked else "DISABLED"
         self._append_log(f"Auto-Save setting updated: {state_str}", "info")
+
+    def _toggle_clipboard_sync(self, checked: bool):
+        config.set_clipboard_sync(checked)
+        state_str = "ENABLED" if checked else "DISABLED"
+        self._append_log(f"Clipboard Auto-Sync: {state_str}", "info")
+        if checked:
+            self._on_local_clipboard_changed()
+
+    def _on_local_clipboard_changed(self):
+        """Called whenever text is copied anywhere on Windows (Ctrl+C)."""
+        if not getattr(self, "chk_clipboard_sync", None) or not self.chk_clipboard_sync.isChecked():
+            return
+        if getattr(self, "_suppress_clipboard_echo", False):
+            return
+
+        try:
+            clipboard = QApplication.clipboard()
+            text = clipboard.text()
+            if text and text != getattr(self, "_last_synced_clipboard", ""):
+                self._last_synced_clipboard = text
+                if hasattr(self, "server_instance") and self.server_instance:
+                    import datetime
+                    self.server_instance.clipboard_content = text
+                    self.server_instance.clipboard_updated_at = datetime.datetime.now().strftime("%H:%M:%S")
+                    self.server_instance.broadcast_event({
+                        "type": "clipboard_updated",
+                        "text": text,
+                        "updated_at": self.server_instance.clipboard_updated_at,
+                    })
+                    snippet = (text[:30] + "...") if len(text) > 30 else text
+                    self._append_log(f"Auto-synced Windows clipboard to network: '{snippet}'", "info")
+        except Exception as e:
+            print(f"Error in _on_local_clipboard_changed: {e}")
+
+    def _on_remote_clipboard_received(self, text: str):
+        """Called when a mobile device or web client updates the shared clipboard."""
+        if not getattr(self, "chk_clipboard_sync", None) or not self.chk_clipboard_sync.isChecked():
+            return
+        if not text or text == getattr(self, "_last_synced_clipboard", ""):
+            return
+
+        try:
+            self._suppress_clipboard_echo = True
+            self._last_synced_clipboard = text
+            QApplication.clipboard().setText(text)
+            self._suppress_clipboard_echo = False
+            snippet = (text[:30] + "...") if len(text) > 30 else text
+            self._append_log(f"Received and copied mobile clipboard to Windows: '{snippet}'", "info")
+        except Exception as e:
+            self._suppress_clipboard_echo = False
+            print(f"Error in _on_remote_clipboard_received: {e}")
 
     def _toggle_autostart(self, checked: bool):
         success = set_autostart(checked)

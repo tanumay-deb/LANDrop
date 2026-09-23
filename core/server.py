@@ -96,6 +96,7 @@ class LandropServer:
         self.received_files_history = []
         self.event_subscribers: list[queue.Queue] = []
         self.activity_callbacks = []
+        self.clipboard_callbacks = []
 
         self._register_routes()
 
@@ -110,6 +111,10 @@ class LandropServer:
     def add_activity_callback(self, callback):
         """Registers a callback for desktop GUI activity logging."""
         self.activity_callbacks.append(callback)
+
+    def add_clipboard_callback(self, callback):
+        """Registers a callback for remote clipboard updates."""
+        self.clipboard_callbacks.append(callback)
 
     def log_activity(self, message: str, event_type: str = "info"):
         """Logs an activity event and notifies desktop GUI callbacks."""
@@ -481,6 +486,13 @@ class LandropServer:
                     "text": self.clipboard_content,
                     "updated_at": self.clipboard_updated_at,
                 })
+
+                for cb in self.clipboard_callbacks:
+                    try:
+                        cb(self.clipboard_content)
+                    except Exception as e:
+                        print(f"Error in clipboard callback: {e}")
+
                 return jsonify({"success": True, "text": self.clipboard_content})
 
             return jsonify({

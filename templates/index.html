@@ -317,6 +317,16 @@
           <span class="timestamp-badge" id="clipboardUpdatedTime">Never synced</span>
         </div>
 
+        <!-- Keep Syncing Checkbox Bar -->
+        <div class="clipboard-sync-toggle-bar">
+          <label class="clipboard-checkbox-label" for="chkKeepSyncingClipboard">
+            <input type="checkbox" id="chkKeepSyncingClipboard" checked />
+            <span class="custom-checkbox-box"></span>
+            <span class="checkbox-text">Keep syncing clipboard automatically</span>
+          </label>
+          <span class="sync-live-status" id="syncLiveStatus">● Auto-Sync Active</span>
+        </div>
+
         <textarea class="clipboard-box" id="clipboardTextarea" placeholder="Type or paste text here to share across devices instantly..."></textarea>
 
         <div class="clipboard-actions">
@@ -325,7 +335,7 @@
               <line x1="22" y1="2" x2="11" y2="13"></line>
               <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
             </svg>
-            <span>Sync to All Devices</span>
+            <span id="btnSendClipboardLabel">Sync Now</span>
           </button>
           <button class="secondary-btn" id="btnCopyClipboard">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
