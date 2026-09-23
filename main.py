@@ -101,7 +101,24 @@ def main():
             from gui import run_gui
             run_gui(start_minimized=args.minimized)
         except Exception as e:
+            import traceback
+            err_msg = traceback.format_exc()
+            try:
+                with open("landrop_error.log", "w", encoding="utf-8") as f:
+                    f.write(err_msg)
+            except Exception:
+                pass
             print(f"Failed to launch GUI ({e}), falling back to headless CLI mode...\n")
+            try:
+                import ctypes
+                ctypes.windll.user32.MessageBoxW(
+                    0,
+                    f"LANDrop could not open the desktop window:\n\n{e}\n\nDetails saved to landrop_error.log",
+                    "LANDrop Launch Notice",
+                    0x30,
+                )
+            except Exception:
+                pass
             run_headless(args.port)
 
 

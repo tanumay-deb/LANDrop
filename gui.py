@@ -897,6 +897,22 @@ class MainWindow(QMainWindow):
                     f"You are currently using the latest release: v{APP_VERSION}.",
                 )
 
+    def _append_log(self, msg: str, event_type: str = "info"):
+        """Thread-safe UI append to Live Activity Log with color formatting."""
+        if hasattr(self, "log_view") and self.log_view:
+            if event_type == "upload":
+                color = "#34d399"
+            elif event_type == "error":
+                color = "#f87171"
+            elif event_type == "warning":
+                color = "#fbbf24"
+            else:
+                color = "#94a3b8"
+            self.log_view.append(f'<span style="color: {color};">{msg}</span>')
+            scrollbar = self.log_view.verticalScrollBar()
+            if scrollbar:
+                scrollbar.setValue(scrollbar.maximum())
+
     def _copy_url(self):
         clipboard = QApplication.clipboard()
         clipboard.setText(self.url_label.text())
@@ -1167,6 +1183,8 @@ def run_gui(start_minimized: bool = False):
     window = MainWindow()
     if not start_minimized:
         window.show()
+        window.raise_()
+        window.activateWindow()
     sys.exit(app.exec())
 
 
