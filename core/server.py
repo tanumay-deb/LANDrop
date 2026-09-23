@@ -32,6 +32,7 @@ from core.network import (
     get_hostname,
     get_local_ip,
 )
+from core.version import APP_VERSION, check_for_updates
 
 
 def format_size(size_bytes: int) -> str:
@@ -160,7 +161,12 @@ class LandropServer:
                 "save_directory": config.save_directory,
                 "safe_folders_count": len(safe_folders),
                 "has_clipboard": bool(self.clipboard_content),
+                "version": APP_VERSION,
             })
+
+        @app.route("/api/version")
+        def api_version():
+            return jsonify(check_for_updates())
 
         # --- Safe List Endpoints ---
 

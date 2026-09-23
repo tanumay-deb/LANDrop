@@ -6,6 +6,8 @@
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <title>LANDrop - Local Wi-Fi File Sharing & Explorer</title>
+  <link rel="icon" type="image/png" href="/static/favicon.png" />
+  <link rel="apple-touch-icon" href="/static/icon-192.png" />
   <link rel="stylesheet" href="/static/css/style.css" />
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -149,9 +151,18 @@
           </div>
         </div>
 
-        <!-- Breadcrumb Navigation Bar -->
-        <div class="breadcrumb-container" id="breadcrumbBar">
-          <span class="breadcrumb-item">Safe List</span>
+        <!-- Breadcrumb & Back Navigation Bar -->
+        <div class="safelist-nav-bar" id="safeNavBar">
+          <button class="action-btn back-btn" id="btnSafeBack" title="Go back" style="display: none;">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="19" y1="12" x2="5" y2="12"></line>
+              <polyline points="12 19 5 12 12 5"></polyline>
+            </svg>
+            <span id="safeBackBtnLabel">Back</span>
+          </button>
+          <div class="breadcrumb-container" id="breadcrumbBar">
+            <span class="breadcrumb-item">Safe List</span>
+          </div>
         </div>
 
         <!-- Filter / Search Input -->

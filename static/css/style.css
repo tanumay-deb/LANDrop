@@ -483,16 +483,65 @@ body.theme-light .logo-text {
   padding: 9px 11px;
 }
 
+/* Safe List Navigation Bar & Breadcrumbs */
+.safelist-nav-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+.safelist-nav-bar .back-btn {
+  background: var(--surface-input);
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  color: var(--accent-cyan);
+  padding: 10px 16px;
+  border-radius: var(--radius-sm);
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  white-space: nowrap;
+  font-size: 0.88rem;
+  font-family: inherit;
+  transition: var(--transition-fast);
+  flex-shrink: 0;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+.safelist-nav-bar .back-btn:hover {
+  background: rgba(56, 189, 248, 0.15);
+  border-color: var(--accent-cyan);
+  color: #ffffff;
+  transform: translateX(-2px);
+  box-shadow: 0 4px 14px rgba(56, 189, 248, 0.25);
+}
+
+.safelist-nav-bar .back-btn svg {
+  width: 17px;
+  height: 17px;
+  transition: transform var(--transition-fast);
+}
+
+.safelist-nav-bar .back-btn:hover svg {
+  transform: translateX(-2px);
+}
+
+.safelist-nav-bar .breadcrumb-container {
+  flex: 1;
+  margin-bottom: 0;
+}
+
 /* Breadcrumb Navigation */
 .breadcrumb-container {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 12px 18px;
+  padding: 11px 16px;
   background: var(--surface-input);
   border-radius: var(--radius-sm);
   border: 1px solid var(--border-subtle);
-  margin-bottom: 18px;
   overflow-x: auto;
   font-size: 0.9rem;
   white-space: nowrap;
@@ -651,6 +700,34 @@ body.theme-light .logo-text {
   background: var(--surface-2);
   transform: translateY(-3px);
   box-shadow: 0 12px 28px -6px rgba(0, 0, 0, 0.35);
+}
+
+/* Parent Directory Card */
+.file-card.parent-dir-card {
+  border: 1.5px dashed rgba(56, 189, 248, 0.4);
+  background: rgba(56, 189, 248, 0.04);
+}
+
+.file-card.parent-dir-card:hover {
+  border-color: var(--accent-cyan);
+  background: rgba(56, 189, 248, 0.12);
+  box-shadow: 0 8px 24px -4px rgba(56, 189, 248, 0.25);
+}
+
+.file-card.parent-dir-card .file-icon {
+  background: rgba(56, 189, 248, 0.18);
+  color: var(--accent-cyan);
+  border: 1px solid rgba(56, 189, 248, 0.4);
+}
+
+.file-card.parent-dir-card .file-name {
+  color: var(--accent-cyan);
+  font-weight: 700;
+}
+
+/* Safe List Overview Root Folder Card */
+.file-card.safelist-root-folder {
+  border-left: 3px solid var(--accent-cyan);
 }
 
 .file-card-top {

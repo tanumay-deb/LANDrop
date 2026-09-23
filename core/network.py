@@ -147,7 +147,7 @@ def generate_qr_png_bytes(url: str) -> bytes:
         import qrcode
 
         qr = qrcode.QRCode(
-            version=1,
+            version=None,
             error_correction=qrcode.constants.ERROR_CORRECT_M,
             box_size=10,
             border=2,

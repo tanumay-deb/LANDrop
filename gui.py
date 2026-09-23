@@ -64,6 +64,16 @@ from core.network import (
     get_local_ip,
 )
 from core.server import LandropServer
+from core.version import APP_VERSION, RELEASES_URL, check_for_updates
+
+
+def get_resource_path(relative_path: str) -> Path:
+    """Get absolute path to resource, works for dev and for PyInstaller bundle."""
+    if getattr(sys, "frozen", False):
+        base_dir = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
+    else:
+        base_dir = Path(__file__).resolve().parent
+    return base_dir / relative_path
 
 
 class ServerThread(threading.Thread):
@@ -87,14 +97,15 @@ class ServerThread(threading.Thread):
 class ActivityBridge(QObject):
     """Bridge for thread-safe UI updates from Flask server to Qt."""
     new_activity = Signal(str, str)
+    update_checked = Signal(dict)
 
 
 class QRDialog(QDialog):
     """Clean, properly scaled dialog showing QR code for mobile scanning."""
-    def __init__(self, url: str, parent=None):
+    def __init__(self, urls, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Connection QR Code")
-        self.setFixedSize(320, 390)
+        self.setWindowTitle("LANDrop - Connection QR Code")
+        self.setFixedSize(340, 440)
         self.setStyleSheet("""
             QDialog {
                 background-color: #0b0f19;
@@ -108,9 +119,9 @@ class QRDialog(QDialog):
                 color: #f8fafc;
                 border: 1px solid rgba(255,255,255,0.12);
                 border-radius: 8px;
-                padding: 8px 16px;
+                padding: 7px 14px;
                 font-weight: 700;
-                font-size: 12px;
+                font-size: 11px;
             }
             QPushButton:hover {
                 background-color: #334155;
@@ -118,43 +129,89 @@ class QRDialog(QDialog):
             }
         """)
 
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(12)
+        if isinstance(urls, dict):
+            self.primary_url = urls.get("primary_url", "")
+            self.landrop_url = urls.get("landrop_url", "")
+        else:
+            self.primary_url = str(urls)
+            self.landrop_url = str(urls)
 
-        info_lbl = QLabel("Scan with your phone camera:")
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 18, 20, 18)
+        layout.setSpacing(10)
+
+        info_lbl = QLabel("Scan with your phone camera to connect:")
         info_lbl.setAlignment(Qt.AlignCenter)
-        info_lbl.setStyleSheet("font-size: 12px; color: #94a3b8; font-weight: 500;")
+        info_lbl.setStyleSheet("font-size: 12px; color: #94a3b8; font-weight: 600;")
         layout.addWidget(info_lbl)
 
-        url_box = QLabel(url)
-        url_box.setAlignment(Qt.AlignCenter)
-        url_box.setStyleSheet("""
+        # Toggle row: Direct IP vs Permanent mDNS
+        mode_layout = QHBoxLayout()
+        mode_layout.setSpacing(8)
+        self.btn_mode_direct = QPushButton("Direct IP (Phone)")
+        self.btn_mode_direct.setStyleSheet("background-color: #0284c7; color: #ffffff; border: 1px solid #38bdf8;")
+        self.btn_mode_mdns = QPushButton("Permanent (landrop.local)")
+
+        self.btn_mode_direct.clicked.connect(self._select_direct)
+        self.btn_mode_mdns.clicked.connect(self._select_mdns)
+
+        mode_layout.addWidget(self.btn_mode_direct)
+        mode_layout.addWidget(self.btn_mode_mdns)
+        layout.addLayout(mode_layout)
+
+        self.url_box = QLabel(self.primary_url)
+        self.url_box.setAlignment(Qt.AlignCenter)
+        self.url_box.setStyleSheet("""
             background-color: #131d31;
-            border: 1px solid rgba(56, 189, 248, 0.3);
+            border: 1px solid rgba(56, 189, 248, 0.35);
             border-radius: 6px;
             padding: 6px 10px;
             font-size: 13px;
             font-weight: bold;
             color: #38bdf8;
         """)
-        url_box.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        layout.addWidget(url_box)
+        self.url_box.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        layout.addWidget(self.url_box)
 
+        self.img_container = QLabel()
+        self.img_container.setAlignment(Qt.AlignCenter)
+        self.img_container.setStyleSheet("background-color: #ffffff; border-radius: 10px; padding: 10px;")
+        layout.addWidget(self.img_container)
+
+        self._update_qr(self.primary_url)
+
+        btn_row = QHBoxLayout()
+        btn_copy = QPushButton("Copy URL")
+        btn_copy.clicked.connect(self._copy_current)
+        btn_row.addWidget(btn_copy)
+
+        close_btn = QPushButton("Close")
+        close_btn.clicked.connect(self.accept)
+        btn_row.addWidget(close_btn)
+        layout.addLayout(btn_row)
+
+    def _select_direct(self):
+        self.btn_mode_direct.setStyleSheet("background-color: #0284c7; color: #ffffff; border: 1px solid #38bdf8;")
+        self.btn_mode_mdns.setStyleSheet("background-color: #1e293b; color: #f8fafc; border: 1px solid rgba(255,255,255,0.12);")
+        self.url_box.setText(self.primary_url)
+        self._update_qr(self.primary_url)
+
+    def _select_mdns(self):
+        self.btn_mode_mdns.setStyleSheet("background-color: #0284c7; color: #ffffff; border: 1px solid #38bdf8;")
+        self.btn_mode_direct.setStyleSheet("background-color: #1e293b; color: #f8fafc; border: 1px solid rgba(255,255,255,0.12);")
+        self.url_box.setText(self.landrop_url)
+        self._update_qr(self.landrop_url)
+
+    def _update_qr(self, url: str):
         qr_bytes = generate_qr_png_bytes(url)
         pix = QPixmap()
         if qr_bytes:
             pix.loadFromData(qr_bytes)
+        self.img_container.setPixmap(pix.scaled(180, 180, Qt.KeepAspectRatio, Qt.SmoothTransformation))
 
-        img_container = QLabel()
-        img_container.setAlignment(Qt.AlignCenter)
-        img_container.setStyleSheet("background-color: #ffffff; border-radius: 10px; padding: 10px;")
-        img_container.setPixmap(pix.scaled(180, 180, Qt.KeepAspectRatio, Qt.SmoothTransformation))
-        layout.addWidget(img_container)
-
-        close_btn = QPushButton("Close")
-        close_btn.clicked.connect(self.accept)
-        layout.addWidget(close_btn)
+    def _copy_current(self):
+        clipboard = QApplication.clipboard()
+        clipboard.setText(self.url_box.text())
 
 
 class MainWindow(QMainWindow):
@@ -301,9 +358,17 @@ class MainWindow(QMainWindow):
             }
         """)
 
+        # Setup icon
+        self.icon_path = get_resource_path("assets/icon.ico")
+        if not self.icon_path.exists():
+            self.icon_path = get_resource_path("assets/icon.png")
+        if self.icon_path.exists():
+            self.setWindowIcon(QIcon(str(self.icon_path)))
+
         # Setup activity bridge
         self.bridge = ActivityBridge()
         self.bridge.new_activity.connect(self._append_log)
+        self.bridge.update_checked.connect(self._on_update_checked)
 
         # Server setup
         self.server_thread = None
@@ -333,6 +398,13 @@ class MainWindow(QMainWindow):
         # ==========================================
         header_layout = QHBoxLayout()
         header_layout.setContentsMargins(0, 0, 0, 4)
+        header_layout.setSpacing(10)
+
+        if self.icon_path.exists():
+            icon_lbl = QLabel()
+            icon_pix = QPixmap(str(self.icon_path)).scaled(32, 32, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            icon_lbl.setPixmap(icon_pix)
+            header_layout.addWidget(icon_lbl)
 
         title_col = QVBoxLayout()
         title_col.setSpacing(2)
@@ -347,6 +419,21 @@ class MainWindow(QMainWindow):
         header_layout.addLayout(title_col)
 
         header_layout.addStretch()
+
+        self.btn_update = QPushButton(f"v{APP_VERSION}")
+        self.btn_update.setStyleSheet("""
+            background-color: rgba(56, 189, 248, 0.12);
+            border: 1px solid rgba(56, 189, 248, 0.3);
+            color: #38bdf8;
+            font-weight: 700;
+            border-radius: 14px;
+            padding: 5px 12px;
+            font-size: 11px;
+        """)
+        self.btn_update.setCursor(Qt.PointingHandCursor)
+        self.btn_update.setToolTip("Click to check for latest updates")
+        self.btn_update.clicked.connect(lambda: self._check_updates_async(manual=True))
+        header_layout.addWidget(self.btn_update)
 
         self.status_badge = QLabel("● Online on Wi-Fi")
         self.status_badge.setStyleSheet("""
@@ -382,13 +469,13 @@ class MainWindow(QMainWindow):
         card_title.setProperty("class", "card-title")
         card_title_row.addWidget(card_title)
 
-        perm_badge = QLabel("Permanent Address")
+        perm_badge = QLabel("Direct IP & mDNS")
         perm_badge.setStyleSheet("background-color: rgba(56, 189, 248, 0.15); color: #38bdf8; font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 8px;")
         card_title_row.addWidget(perm_badge)
         card_title_row.addStretch()
         conn_layout.addLayout(card_title_row)
 
-        card_subtitle = QLabel("Bookmark this address on your phone — it stays connected even if your Wi-Fi router changes your IP:")
+        card_subtitle = QLabel("Scan the QR code or open the link below on your phone to transfer files immediately:")
         card_subtitle.setProperty("class", "card-subtitle")
         conn_layout.addWidget(card_subtitle)
 
@@ -396,7 +483,7 @@ class MainWindow(QMainWindow):
         addr_row = QHBoxLayout()
         addr_row.setSpacing(8)
 
-        self.url_label = QLineEdit("http://landrop.local:5000")
+        self.url_label = QLineEdit("http://127.0.0.1:5000")
         self.url_label.setReadOnly(True)
         self.url_label.setStyleSheet("""
             background-color: #131d31;
@@ -485,6 +572,24 @@ class MainWindow(QMainWindow):
         dir_row.addWidget(btn_open_dir)
 
         autosave_layout.addLayout(dir_row)
+
+        fw_row = QHBoxLayout()
+        fw_row.setSpacing(10)
+
+        fw_lbl = QLabel("🛡️ Windows Firewall:")
+        fw_lbl.setStyleSheet("color: #94a3b8; font-size: 11px; font-weight: 600;")
+        fw_row.addWidget(fw_lbl)
+
+        fw_desc = QLabel("Fix repeated 'Allow Python to connect' network pop-ups on this PC")
+        fw_desc.setStyleSheet("color: #64748b; font-size: 11px;")
+        fw_row.addWidget(fw_desc, 1)
+
+        btn_firewall = QPushButton("Allow in Windows Firewall (1-Click)")
+        btn_firewall.setMinimumWidth(210)
+        btn_firewall.clicked.connect(self._configure_firewall)
+        fw_row.addWidget(btn_firewall)
+
+        autosave_layout.addLayout(fw_row)
         root_layout.addWidget(autosave_card)
 
         # ==========================================
@@ -573,20 +678,26 @@ class MainWindow(QMainWindow):
         self._refresh_safe_table()
 
     def _setup_tray(self):
-        """Sets up the Windows system tray icon without adding any in-window menu bar."""
+        """Sets up the Windows system tray icon with custom app icon."""
         self.tray_icon = QSystemTrayIcon(self)
-        self.tray_icon.setIcon(self.style().standardIcon(QStyle.SP_ComputerIcon))
+        if self.icon_path.exists():
+            self.tray_icon.setIcon(QIcon(str(self.icon_path)))
+        else:
+            self.tray_icon.setIcon(self.style().standardIcon(QStyle.SP_ComputerIcon))
 
         tray_menu = QMenu(self)
         show_action = QAction("Open LANDrop Control Panel", self)
         show_action.triggered.connect(self.showNormal)
         open_web_action = QAction("Open Web App in Browser", self)
         open_web_action.triggered.connect(self._open_browser)
+        update_action = QAction(f"Check for Updates (v{APP_VERSION})...", self)
+        update_action.triggered.connect(lambda: self._check_updates_async(manual=True))
         quit_action = QAction("Exit LANDrop", self)
         quit_action.triggered.connect(self._clean_exit)
 
         tray_menu.addAction(show_action)
         tray_menu.addAction(open_web_action)
+        tray_menu.addAction(update_action)
         tray_menu.addSeparator()
         tray_menu.addAction(quit_action)
 
@@ -608,46 +719,117 @@ class MainWindow(QMainWindow):
             self.server_thread.start()
 
             urls = get_connection_urls(actual_port)
+            self.active_urls = urls
             self.active_landrop_url = urls["landrop_url"]
             self.active_primary_url = urls["primary_url"]
             self.active_mdns_url = urls["mdns_url"]
 
-            self.url_label.setText(urls["landrop_url"])
-            self.ip_subtext.setText(f"Direct IP: {urls['primary_url']}  •  Hostname: {urls['mdns_url']}  •  Host: {urls['hostname']}")
-            self._append_log(f"Server started on port {actual_port}. Broadcasting {urls['landrop_url']}.", "info")
+            # Prioritize Direct IP for reliable phone connection
+            self.url_label.setText(urls["primary_url"])
+            self.ip_subtext.setText(f"Direct IP: {urls['primary_url']}  •  Permanent: {urls['landrop_url']}  •  Hostname: {urls['mdns_url']}")
+            self._append_log(f"Server started on port {actual_port}. Direct IP: {urls['primary_url']}.", "info")
+
+            # Check for updates in background
+            self._check_updates_async(manual=False)
         except Exception as e:
             QMessageBox.critical(self, "Server Error", f"Failed to start server: {e}")
 
-    def _append_log(self, text: str, event_type: str = "info"):
-        color = "#f8fafc"
-        badge = "[INFO]"
-        badge_color = "#38bdf8"
+    def _configure_firewall(self):
+        """Allows LANDrop through Windows Firewall with a single click."""
+        bat_path = get_resource_path("allow_firewall.bat")
+        if bat_path.exists():
+            cmd = f'powershell -Command "Start-Process cmd -ArgumentList \'/c \"\"{bat_path}\"\"\' -Verb RunAs"'
+            os.system(cmd)
+            self._append_log("Invoked Windows Firewall auto-configuration script with Administrator privileges.", "info")
+            QMessageBox.information(
+                self,
+                "Windows Firewall Configuration",
+                "A Windows User Account Control (UAC) prompt will appear.\n\n"
+                "Click 'Yes' to add permanent inbound firewall rules for Port 5000 & mDNS.\n"
+                "Once allowed, Windows will never prompt you again!",
+            )
+        else:
+            ps_cmd = (
+                'powershell -Command "Start-Process powershell -ArgumentList \'-Command '
+                '\\\"New-NetFirewallRule -DisplayName \\\'LANDrop Wi-Fi File Transfer\\\' -Direction Inbound -LocalPort 5000 -Protocol TCP -Action Allow; '
+                'New-NetFirewallRule -DisplayName \\\'LANDrop Wi-Fi File Transfer UDP\\\' -Direction Inbound -LocalPort 5000 -Protocol UDP -Action Allow; '
+                'New-NetFirewallRule -DisplayName \\\'LANDrop mDNS Discovery\\\' -Direction Inbound -LocalPort 5353 -Protocol UDP -Action Allow\\\"\' -Verb RunAs"'
+            )
+            os.system(ps_cmd)
+            QMessageBox.information(
+                self,
+                "Windows Firewall",
+                "Firewall configuration commands have been sent. Confirm the administrator prompt to apply.",
+            )
 
-        if event_type == "upload":
-            color = "#34d399"
-            badge = "[AUTO-SAVED]"
-            badge_color = "#10b981"
-        elif event_type == "error":
-            color = "#fb7185"
-            badge = "[ERROR]"
-            badge_color = "#ef4444"
+    def _check_updates_async(self, manual: bool = False):
+        self.manual_update_check = manual
+        t = threading.Thread(target=self._run_update_check, daemon=True)
+        t.start()
 
-        entry_html = f"<span style='color:{badge_color}; font-weight:bold;'>{badge}</span> <span style='color:{color};'>{text}</span>"
-        self.log_view.append(entry_html)
+    def _run_update_check(self):
+        res = check_for_updates()
+        self.bridge.update_checked.emit(res)
+
+    def _on_update_checked(self, res: dict):
+        if res.get("update_available"):
+            latest = res.get("latest_version")
+            self.btn_update.setText(f"🚀 Update v{latest} Available")
+            self.btn_update.setStyleSheet("""
+                background-color: #f59e0b;
+                color: #0b0f19;
+                font-weight: 800;
+                border-radius: 14px;
+                padding: 5px 12px;
+                font-size: 11px;
+                border: 1px solid #fbbf24;
+            """)
+            self.btn_update.setToolTip(f"New update v{latest} available! Click to download on GitHub.")
+            try:
+                self.btn_update.clicked.disconnect()
+            except Exception:
+                pass
+            self.btn_update.clicked.connect(lambda: webbrowser.open(res.get("release_url", RELEASES_URL)))
+
+            if getattr(self, "manual_update_check", False):
+                reply = QMessageBox.question(
+                    self,
+                    "Update Available",
+                    f"A new version of LANDrop is available: v{latest}!\n\nWould you like to open the GitHub release page to download it?",
+                    QMessageBox.Yes | QMessageBox.No,
+                )
+                if reply == QMessageBox.Yes:
+                    webbrowser.open(res.get("release_url", RELEASES_URL))
+        else:
+            self.btn_update.setText(f"✓ v{APP_VERSION} Latest")
+            self.btn_update.setStyleSheet("""
+                background-color: rgba(56, 189, 248, 0.12);
+                border: 1px solid rgba(56, 189, 248, 0.3);
+                color: #38bdf8;
+                font-weight: 700;
+                border-radius: 14px;
+                padding: 5px 12px;
+                font-size: 11px;
+            """)
+            self.btn_update.setToolTip(f"You are running the latest version (v{APP_VERSION}). Click to re-check.")
+            if getattr(self, "manual_update_check", False):
+                QMessageBox.information(
+                    self,
+                    "LANDrop Up to Date",
+                    f"You are currently using the latest release: v{APP_VERSION}.",
+                )
 
     def _copy_url(self):
-        urls = get_connection_urls(self.port)
         clipboard = QApplication.clipboard()
-        clipboard.setText(urls["landrop_url"])
-        self._append_log(f"Copied permanent URL {urls['landrop_url']} to clipboard.", "info")
+        clipboard.setText(self.url_label.text())
+        self._append_log(f"Copied URL {self.url_label.text()} to clipboard.", "info")
 
     def _open_browser(self):
-        urls = get_connection_urls(self.port)
-        webbrowser.open(urls["landrop_url"])
+        webbrowser.open(self.url_label.text())
 
     def _show_qr(self):
-        urls = get_connection_urls(self.port)
-        dlg = QRDialog(urls["landrop_url"], self)
+        urls = getattr(self, "active_urls", self.url_label.text())
+        dlg = QRDialog(urls, self)
         dlg.exec()
 
     def _toggle_autosave(self, checked: bool):

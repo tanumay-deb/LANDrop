@@ -8,6 +8,7 @@
 let currentFolderId = "";
 let currentSubpath = "";
 let safeItemsCache = [];
+let cachedSafeFolders = [];
 let serverInfo = null;
 
 // DOM Elements
@@ -15,6 +16,8 @@ const hostNameDisplay = document.getElementById("hostNameDisplay");
 const selectSafeFolder = document.getElementById("selectSafeFolder");
 const safeFilesContainer = document.getElementById("safeFilesContainer");
 const breadcrumbBar = document.getElementById("breadcrumbBar");
+const btnSafeBack = document.getElementById("btnSafeBack");
+const safeBackBtnLabel = document.getElementById("safeBackBtnLabel");
 const safeSearchInput = document.getElementById("safeSearchInput");
 const btnDownloadFolderZip = document.getElementById("btnDownloadFolderZip");
 const btnRefreshSafe = document.getElementById("btnRefreshSafe");
@@ -184,39 +187,125 @@ hostPill.addEventListener("click", async () => {
 
 // --- Safe List Folder Explorer ---
 
+function getParentSubpath(subpath) {
+  if (!subpath) return "";
+  const normalized = subpath.replace(/\\/g, "/").replace(/\/+$/, "");
+  const parts = normalized.split("/").filter(Boolean);
+  parts.pop();
+  return parts.join("/");
+}
+
+function showAllSafeFolders(pushHistory = true) {
+  currentFolderId = "";
+  currentSubpath = "";
+  if (selectSafeFolder) selectSafeFolder.value = "";
+  if (btnDownloadFolderZip) btnDownloadFolderZip.style.display = "none";
+  if (btnSafeBack) btnSafeBack.style.display = "none";
+
+  breadcrumbBar.innerHTML = `<span class="breadcrumb-item active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;vertical-align:-2px;margin-right:4px;"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>Shared Safe Folders</span>`;
+
+  if (pushHistory) {
+    window.history.pushState({ view: "safelist_root" }, "", window.location.pathname);
+  }
+
+  safeFilesContainer.innerHTML = "";
+  if (!cachedSafeFolders || cachedSafeFolders.length === 0) {
+    renderSafeEmptyState("No folders have been added to the Safe List on the host PC yet.");
+    return;
+  }
+
+  cachedSafeFolders.forEach((f) => {
+    const card = document.createElement("div");
+    card.className = "file-card safelist-root-folder";
+
+    const top = document.createElement("div");
+    top.className = "file-card-top";
+
+    const iconDiv = document.createElement("div");
+    iconDiv.className = "file-icon folder";
+    iconDiv.innerHTML = categoryIcons.folder;
+
+    const details = document.createElement("div");
+    details.className = "file-details";
+
+    const name = document.createElement("div");
+    name.className = "file-name";
+    name.title = f.name;
+    name.innerText = f.name;
+
+    const meta = document.createElement("div");
+    meta.className = "file-meta";
+    meta.innerText = `${f.item_count || 0} items • Shared PC Folder`;
+
+    details.appendChild(name);
+    details.appendChild(meta);
+    top.appendChild(iconDiv);
+    top.appendChild(details);
+    card.appendChild(top);
+
+    const actions = document.createElement("div");
+    actions.className = "file-card-actions";
+    const openBtn = document.createElement("button");
+    openBtn.className = "card-action-btn";
+    openBtn.innerHTML = `<span>Browse Folder</span>`;
+    actions.appendChild(openBtn);
+    card.appendChild(actions);
+
+    card.addEventListener("click", () => {
+      selectSafeFolder.value = f.id;
+      browseSafeFolder(f.id, "");
+    });
+
+    safeFilesContainer.appendChild(card);
+  });
+}
+
 async function fetchSafeFolders() {
   try {
     const res = await fetch("/api/safelist");
     if (!res.ok) return;
     const data = await res.json();
-    const folders = data.folders || [];
+    cachedSafeFolders = data.folders || [];
 
-    badgeSafeCount.innerText = folders.length;
+    badgeSafeCount.innerText = cachedSafeFolders.length;
     selectSafeFolder.innerHTML = "";
 
-    if (folders.length === 0) {
+    if (cachedSafeFolders.length === 0) {
       const opt = document.createElement("option");
       opt.value = "";
       opt.innerText = "No folders added to Safe List on PC";
       selectSafeFolder.appendChild(opt);
       renderSafeEmptyState("No folders have been added to the Safe List on the host PC yet.");
+      if (btnSafeBack) btnSafeBack.style.display = "none";
       return;
     }
 
-    folders.forEach((f) => {
+    const allOpt = document.createElement("option");
+    allOpt.value = "";
+    allOpt.innerText = "📁 All Shared Safe Folders";
+    selectSafeFolder.appendChild(allOpt);
+
+    cachedSafeFolders.forEach((f) => {
       const opt = document.createElement("option");
       opt.value = f.id;
-      opt.innerText = `${f.name} (${f.item_count} items)`;
+      opt.innerText = `📂 ${f.name} (${f.item_count} items)`;
       selectSafeFolder.appendChild(opt);
     });
 
-    // Auto-select first folder if not selected
-    if (!currentFolderId || !folders.some((f) => f.id === currentFolderId)) {
-      currentFolderId = folders[0].id;
-      currentSubpath = "";
+    // Auto-select folder or show root list
+    if (!currentFolderId) {
+      if (cachedSafeFolders.length === 1) {
+        currentFolderId = cachedSafeFolders[0].id;
+        currentSubpath = "";
+        selectSafeFolder.value = currentFolderId;
+        browseSafeFolder(currentFolderId, "", false);
+      } else {
+        showAllSafeFolders(false);
+      }
+    } else {
+      selectSafeFolder.value = currentFolderId;
+      browseSafeFolder(currentFolderId, currentSubpath, false);
     }
-    selectSafeFolder.value = currentFolderId;
-    browseSafeFolder(currentFolderId, currentSubpath);
   } catch (e) {
     renderSafeEmptyState("Error loading safe list folders.");
   }
@@ -227,6 +316,8 @@ selectSafeFolder.addEventListener("change", (e) => {
   currentSubpath = "";
   if (currentFolderId) {
     browseSafeFolder(currentFolderId, "");
+  } else {
+    showAllSafeFolders();
   }
 });
 
@@ -245,9 +336,53 @@ btnDownloadFolderZip.addEventListener("click", () => {
   showToast("Preparing ZIP archive for download...", "info");
 });
 
-async function browseSafeFolder(folderId, subpath = "") {
+if (btnSafeBack) {
+  btnSafeBack.addEventListener("click", () => {
+    if (currentSubpath) {
+      browseSafeFolder(currentFolderId, getParentSubpath(currentSubpath));
+    } else {
+      showAllSafeFolders();
+    }
+  });
+}
+
+// Browser back/forward navigation support
+window.addEventListener("popstate", (e) => {
+  if (e.state) {
+    if (e.state.view === "safelist_folder" && e.state.folderId) {
+      browseSafeFolder(e.state.folderId, e.state.subpath || "", false);
+    } else if (e.state.view === "safelist_root") {
+      showAllSafeFolders(false);
+    }
+  }
+});
+
+async function browseSafeFolder(folderId, subpath = "", pushHistory = true) {
+  if (!folderId) {
+    showAllSafeFolders(pushHistory);
+    return;
+  }
+
   currentFolderId = folderId;
   currentSubpath = subpath;
+  if (selectSafeFolder) selectSafeFolder.value = folderId;
+  if (btnDownloadFolderZip) btnDownloadFolderZip.style.display = "inline-flex";
+
+  // Update Back button state
+  if (btnSafeBack) {
+    btnSafeBack.style.display = "inline-flex";
+    if (subpath) {
+      safeBackBtnLabel.innerText = "Back";
+      btnSafeBack.title = "Go up to parent directory";
+    } else {
+      safeBackBtnLabel.innerText = "All Folders";
+      btnSafeBack.title = "Back to all shared safe folders";
+    }
+  }
+
+  if (pushHistory) {
+    window.history.pushState({ view: "safelist_folder", folderId, subpath }, "", window.location.pathname);
+  }
 
   try {
     const url = `/api/safelist/browse?folder_id=${encodeURIComponent(folderId)}&subpath=${encodeURIComponent(subpath)}`;
@@ -269,18 +404,28 @@ async function browseSafeFolder(folderId, subpath = "") {
 
 function renderBreadcrumbs(crumbs) {
   breadcrumbBar.innerHTML = "";
+
+  // Root Safe List item
+  const rootItem = document.createElement("span");
+  rootItem.className = "breadcrumb-item";
+  rootItem.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;vertical-align:-2px;margin-right:4px;"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>Safe List`;
+  rootItem.title = "View all shared safe folders";
+  rootItem.addEventListener("click", () => {
+    showAllSafeFolders();
+  });
+  breadcrumbBar.appendChild(rootItem);
+
   crumbs.forEach((crumb, idx) => {
-    if (idx > 0) {
-      const sep = document.createElement("span");
-      sep.className = "breadcrumb-separator";
-      sep.innerText = "/";
-      breadcrumbBar.appendChild(sep);
-    }
+    const sep = document.createElement("span");
+    sep.className = "breadcrumb-separator";
+    sep.innerText = "/";
+    breadcrumbBar.appendChild(sep);
 
     const item = document.createElement("span");
-    item.className = "breadcrumb-item" + (idx === crumbs.length - 1 ? " active" : "");
+    const isLast = (idx === crumbs.length - 1);
+    item.className = "breadcrumb-item" + (isLast ? " active" : "");
     item.innerText = crumb.name;
-    if (idx < crumbs.length - 1) {
+    if (!isLast) {
       item.addEventListener("click", () => {
         browseSafeFolder(currentFolderId, crumb.subpath);
       });
@@ -292,7 +437,51 @@ function renderBreadcrumbs(crumbs) {
 function renderSafeItems(items) {
   safeFilesContainer.innerHTML = "";
 
-  if (items.length === 0) {
+  // Add Parent Directory item at top if inside a subfolder
+  if (currentSubpath) {
+    const parentCard = document.createElement("div");
+    parentCard.className = "file-card parent-dir-card";
+
+    const top = document.createElement("div");
+    top.className = "file-card-top";
+
+    const iconDiv = document.createElement("div");
+    iconDiv.className = "file-icon folder parent-icon";
+    iconDiv.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 14 4 9 9 4"></polyline><path d="M20 20v-7a4 4 0 0 0-4-4H4"></path></svg>`;
+
+    const details = document.createElement("div");
+    details.className = "file-details";
+
+    const name = document.createElement("div");
+    name.className = "file-name";
+    name.innerText = ".. (Parent Folder)";
+
+    const meta = document.createElement("div");
+    meta.className = "file-meta";
+    meta.innerText = "Tap to go back one level";
+
+    details.appendChild(name);
+    details.appendChild(meta);
+    top.appendChild(iconDiv);
+    top.appendChild(details);
+    parentCard.appendChild(top);
+
+    const actions = document.createElement("div");
+    actions.className = "file-card-actions";
+    const backBtn = document.createElement("button");
+    backBtn.className = "card-action-btn back-action-btn";
+    backBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"></polyline></svg><span>Back</span>`;
+    actions.appendChild(backBtn);
+    parentCard.appendChild(actions);
+
+    parentCard.addEventListener("click", () => {
+      browseSafeFolder(currentFolderId, getParentSubpath(currentSubpath));
+    });
+
+    safeFilesContainer.appendChild(parentCard);
+  }
+
+  if (items.length === 0 && !currentSubpath) {
     renderSafeEmptyState("This folder is empty");
     return;
   }
