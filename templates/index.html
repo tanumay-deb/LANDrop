@@ -500,8 +500,70 @@
         </div>
       </div>
     </section>
-
   </main>
+
+  <!-- ZIP Download Progress Modal -->
+  <div class="modal-backdrop hidden" id="zipProgressModal">
+    <div class="modal-card zip-modal-card">
+      <div class="modal-header">
+        <h3 class="modal-title">Preparing ZIP Archive</h3>
+        <button class="modal-close-btn" id="btnCloseZipModal" aria-label="Cancel ZIP">&times;</button>
+      </div>
+      <div class="modal-body zip-modal-body">
+        <div class="zip-folder-title" id="zipModalFolderName">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+          </svg>
+          <span id="zipModalFolderText">Folder</span>
+        </div>
+
+        <!-- SVG Circular Progress Indicator -->
+        <div class="zip-circle-wrap">
+          <svg class="progress-ring" width="130" height="130" viewBox="0 0 130 130">
+            <circle
+              class="progress-ring-track"
+              stroke-width="8"
+              fill="transparent"
+              r="52"
+              cx="65"
+              cy="65"
+            />
+            <circle
+              class="progress-ring-circle"
+              id="zipProgressCircle"
+              stroke-width="8"
+              stroke-linecap="round"
+              fill="transparent"
+              r="52"
+              cx="65"
+              cy="65"
+              style="stroke-dasharray: 326.7; stroke-dashoffset: 326.7;"
+            />
+          </svg>
+          <div class="zip-circle-inner">
+            <span class="zip-percent-label" id="zipPercentLabel">0%</span>
+            <span class="zip-status-badge" id="zipStatusBadge">Packaging</span>
+          </div>
+        </div>
+
+        <div class="zip-file-status" id="zipCurrentFile">Analyzing folder contents...</div>
+        <div class="zip-stats-row">
+          <span class="zip-stat" id="zipFilesCount">0 / 0 files</span>
+          <span class="zip-stat-dot">&bull;</span>
+          <span class="zip-stat" id="zipBytesCount">0 B / 0 B</span>
+        </div>
+      </div>
+      <div class="modal-footer zip-modal-footer">
+        <button class="secondary-btn" id="btnCancelZip">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+          <span id="btnCancelZipLabel">Cancel</span>
+        </button>
+      </div>
+    </div>
+  </div>
 
   <!-- Media Preview Modal -->
   <div class="modal-backdrop hidden" id="previewModal">

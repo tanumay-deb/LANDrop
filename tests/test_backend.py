@@ -144,6 +144,52 @@ class TestLandrop(unittest.TestCase):
         self.assertTrue(len(res.data) > 0)
         res.close()
 
+        # Test asynchronous ZIP packaging job with progress tracking
+        prep_res = self.client.post(
+            "/api/safelist/prepare-zip",
+            json={"folder_id": folder_id, "subpath": ""},
+        )
+        self.assertEqual(prep_res.status_code, 200)
+        prep_data = prep_res.get_json()
+        self.assertTrue(prep_data["success"])
+        job_id = prep_data["job_id"]
+        self.assertGreater(prep_data["total_files"], 0)
+
+        # Poll progress until completed (with timeout)
+        import time
+        completed = False
+        for _ in range(50):
+            prog_res = self.client.get(f"/api/safelist/zip-progress?job_id={job_id}")
+            self.assertEqual(prog_res.status_code, 200)
+            prog_data = prog_res.get_json()
+            if prog_data["status"] == "completed":
+                self.assertEqual(prog_data["percent"], 100.0)
+                completed = True
+                break
+            time.sleep(0.05)
+        self.assertTrue(completed, "ZIP packaging job did not complete in time")
+
+        # Download the prepared ZIP file
+        dl_res = self.client.get(f"/api/safelist/download-zip-file?job_id={job_id}")
+        self.assertEqual(dl_res.status_code, 200)
+        self.assertEqual(dl_res.mimetype, "application/zip")
+        self.assertGreater(len(dl_res.data), 0)
+        dl_res.close()
+
+        # Test cancelling a ZIP job
+        prep_res2 = self.client.post(
+            "/api/safelist/prepare-zip",
+            json={"folder_id": folder_id, "subpath": ""},
+        )
+        self.assertEqual(prep_res2.status_code, 200)
+        job_id2 = prep_res2.get_json()["job_id"]
+        cancel_res = self.client.post(
+            "/api/safelist/cancel-zip",
+            json={"job_id": job_id2},
+        )
+        self.assertEqual(cancel_res.status_code, 200)
+        self.assertTrue(cancel_res.get_json()["success"])
+
         # Path traversal attack via API must return 403
         res = self.client.get(f"/api/safelist/browse?folder_id={folder_id}&subpath=../../")
         self.assertEqual(res.status_code, 403)

@@ -70,6 +70,24 @@ const btnQrModal = document.getElementById("btnQrModal");
 const btnCloseQr = document.getElementById("btnCloseQr");
 const qrUrlText = document.getElementById("qrUrlText");
 
+// ZIP Download Progress Modal DOM Elements
+const zipProgressModal = document.getElementById("zipProgressModal");
+const btnCloseZipModal = document.getElementById("btnCloseZipModal");
+const btnCancelZip = document.getElementById("btnCancelZip");
+const btnCancelZipLabel = document.getElementById("btnCancelZipLabel");
+const zipModalFolderName = document.getElementById("zipModalFolderName");
+const zipModalFolderText = document.getElementById("zipModalFolderText");
+const zipProgressCircle = document.getElementById("zipProgressCircle");
+const zipPercentLabel = document.getElementById("zipPercentLabel");
+const zipStatusBadge = document.getElementById("zipStatusBadge");
+const zipCurrentFile = document.getElementById("zipCurrentFile");
+const zipFilesCount = document.getElementById("zipFilesCount");
+const zipBytesCount = document.getElementById("zipBytesCount");
+
+let activeZipJobId = null;
+let zipProgressTimer = null;
+const ZIP_RING_CIRCUMFERENCE = 326.7;
+
 // Theme
 const btnThemeToggle = document.getElementById("btnThemeToggle");
 
@@ -340,12 +358,215 @@ btnRefreshSafe.addEventListener("click", () => {
   }
 });
 
+// --- Safe List Folder ZIP Packaging with Live Progress Circle ---
+
 btnDownloadFolderZip.addEventListener("click", () => {
   if (!currentFolderId) return;
-  const url = `/api/safelist/download-zip?folder_id=${encodeURIComponent(currentFolderId)}&subpath=${encodeURIComponent(currentSubpath)}`;
-  window.location.href = url;
-  showToast("Preparing ZIP archive for download...", "info");
+  startFolderZipDownload(currentFolderId, currentSubpath);
 });
+
+function openZipProgressModal(folderName) {
+  if (zipModalFolderText) zipModalFolderText.innerText = folderName;
+  if (zipProgressCircle) {
+    zipProgressCircle.style.strokeDashoffset = ZIP_RING_CIRCUMFERENCE;
+    zipProgressCircle.classList.remove("completed", "error");
+  }
+  if (zipPercentLabel) zipPercentLabel.innerText = "0%";
+  if (zipStatusBadge) {
+    zipStatusBadge.innerText = "Packaging";
+    zipStatusBadge.style.color = "var(--accent-cyan)";
+  }
+  if (zipCurrentFile) zipCurrentFile.innerText = "Scanning folder contents...";
+  if (zipFilesCount) zipFilesCount.innerText = "0 / 0 files";
+  if (zipBytesCount) zipBytesCount.innerText = "0 B / 0 B";
+  if (btnCancelZipLabel) btnCancelZipLabel.innerText = "Cancel";
+
+  if (zipProgressModal) {
+    zipProgressModal.classList.remove("hidden");
+  }
+}
+
+function closeZipProgressModal() {
+  if (zipProgressTimer) {
+    clearInterval(zipProgressTimer);
+    zipProgressTimer = null;
+  }
+  activeZipJobId = null;
+  if (zipProgressModal) {
+    zipProgressModal.classList.add("hidden");
+  }
+}
+
+async function cancelZipDownload() {
+  if (zipProgressTimer) {
+    clearInterval(zipProgressTimer);
+    zipProgressTimer = null;
+  }
+  if (activeZipJobId) {
+    const jid = activeZipJobId;
+    activeZipJobId = null;
+    try {
+      await fetch("/api/safelist/cancel-zip", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ job_id: jid }),
+      });
+    } catch (e) {
+      // Ignore network errors on cancel
+    }
+  }
+  closeZipProgressModal();
+  showToast("ZIP preparation cancelled", "info");
+}
+
+async function startFolderZipDownload(folderId, subpath) {
+  let folderName = "Folder";
+  if (subpath) {
+    folderName = subpath.split(/[\\/]/).filter(Boolean).pop() || "Folder";
+  } else {
+    const match = cachedSafeFolders.find((f) => f.id === folderId);
+    if (match && match.name) folderName = match.name;
+  }
+
+  openZipProgressModal(folderName);
+
+  try {
+    const res = await fetch("/api/safelist/prepare-zip", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ folder_id: folderId, subpath: subpath }),
+    });
+
+    const data = await res.json();
+    if (!res.ok || !data.success) {
+      showZipError(data.error || "Failed to start packaging folder");
+      return;
+    }
+
+    activeZipJobId = data.job_id;
+    if (data.total_files === 0) {
+      if (zipCurrentFile) zipCurrentFile.innerText = "Folder is empty. Preparing empty ZIP...";
+    } else {
+      if (zipFilesCount) zipFilesCount.innerText = `0 / ${data.total_files} files`;
+      if (zipBytesCount) zipBytesCount.innerText = `0 B / ${formatBytes(data.total_bytes)}`;
+    }
+
+    pollZipProgress(data.job_id, folderName, data.total_files, data.total_bytes);
+  } catch (err) {
+    showZipError("Network error starting ZIP preparation");
+  }
+}
+
+function showZipError(message) {
+  if (zipProgressTimer) {
+    clearInterval(zipProgressTimer);
+    zipProgressTimer = null;
+  }
+  if (zipProgressCircle) zipProgressCircle.classList.add("error");
+  if (zipPercentLabel) zipPercentLabel.innerText = "!";
+  if (zipStatusBadge) {
+    zipStatusBadge.innerText = "Error";
+    zipStatusBadge.style.color = "var(--accent-rose)";
+  }
+  if (zipCurrentFile) zipCurrentFile.innerText = message;
+  if (btnCancelZipLabel) btnCancelZipLabel.innerText = "Close";
+  showToast(message, "error");
+}
+
+function pollZipProgress(jobId, folderName, initialFiles, initialBytes) {
+  if (zipProgressTimer) clearInterval(zipProgressTimer);
+
+  zipProgressTimer = setInterval(async () => {
+    if (!activeZipJobId || activeZipJobId !== jobId) {
+      clearInterval(zipProgressTimer);
+      return;
+    }
+
+    try {
+      const res = await fetch(`/api/safelist/zip-progress?job_id=${encodeURIComponent(jobId)}`);
+      if (!res.ok) {
+        clearInterval(zipProgressTimer);
+        showZipError("Unable to track compression progress");
+        return;
+      }
+
+      const progress = await res.json();
+
+      if (progress.status === "processing") {
+        const pct = Math.min(99.0, Math.max(0, progress.percent || 0));
+        const offset = ZIP_RING_CIRCUMFERENCE - (pct / 100) * ZIP_RING_CIRCUMFERENCE;
+
+        if (zipProgressCircle) zipProgressCircle.style.strokeDashoffset = offset;
+        if (zipPercentLabel) zipPercentLabel.innerText = `${Math.floor(pct)}%`;
+        if (zipStatusBadge) {
+          zipStatusBadge.innerText = "Packaging";
+          zipStatusBadge.style.color = "var(--accent-cyan)";
+        }
+        if (zipCurrentFile) {
+          zipCurrentFile.innerText = progress.current_file
+            ? `Packing: ${progress.current_file}`
+            : "Compressing files...";
+          zipCurrentFile.title = progress.current_file || "";
+        }
+        if (zipFilesCount) {
+          zipFilesCount.innerText = `${progress.processed_files} / ${progress.total_files || initialFiles} files`;
+        }
+        if (zipBytesCount) {
+          zipBytesCount.innerText = `${formatBytes(progress.processed_bytes)} / ${formatBytes(progress.total_bytes || initialBytes)}`;
+        }
+      } else if (progress.status === "completed") {
+        clearInterval(zipProgressTimer);
+        zipProgressTimer = null;
+
+        if (zipProgressCircle) {
+          zipProgressCircle.style.strokeDashoffset = 0;
+          zipProgressCircle.classList.remove("error");
+          zipProgressCircle.classList.add("completed");
+        }
+        if (zipPercentLabel) zipPercentLabel.innerText = "100%";
+        if (zipStatusBadge) {
+          zipStatusBadge.innerText = "Ready";
+          zipStatusBadge.style.color = "var(--accent-emerald)";
+        }
+        if (zipCurrentFile) zipCurrentFile.innerText = "Archive ready! Starting download...";
+        if (zipFilesCount) {
+          zipFilesCount.innerText = `${progress.total_files || initialFiles} / ${progress.total_files || initialFiles} files`;
+        }
+        if (zipBytesCount) {
+          zipBytesCount.innerText = `${formatBytes(progress.total_bytes || initialBytes)} / ${formatBytes(progress.total_bytes || initialBytes)}`;
+        }
+
+        // Trigger browser file download
+        const downloadUrl = `/api/safelist/download-zip-file?job_id=${encodeURIComponent(jobId)}`;
+        const downloadLink = document.createElement("a");
+        downloadLink.href = downloadUrl;
+        downloadLink.download = `${folderName}.zip`;
+        document.body.appendChild(downloadLink);
+        downloadLink.click();
+        downloadLink.remove();
+
+        showToast(`✓ ZIP download started: ${folderName}.zip`, "success");
+
+        // Automatically close modal after 1.8 seconds
+        setTimeout(() => {
+          if (activeZipJobId === jobId) {
+            closeZipProgressModal();
+          }
+        }, 1800);
+      } else if (progress.status === "error") {
+        clearInterval(zipProgressTimer);
+        zipProgressTimer = null;
+        showZipError(progress.error || "ZIP packaging failed");
+      } else if (progress.status === "cancelled") {
+        clearInterval(zipProgressTimer);
+        zipProgressTimer = null;
+        closeZipProgressModal();
+      }
+    } catch (e) {
+      console.warn("Error polling zip progress:", e);
+    }
+  }, 300);
+}
 
 if (btnSafeBack) {
   btnSafeBack.addEventListener("click", () => {
@@ -1156,11 +1377,23 @@ function setupModalEvents() {
     if (e.target === qrModal) qrModal.classList.add("hidden");
   });
 
+  // ZIP Progress Modal
+  if (btnCloseZipModal) btnCloseZipModal.addEventListener("click", cancelZipDownload);
+  if (btnCancelZip) btnCancelZip.addEventListener("click", cancelZipDownload);
+  if (zipProgressModal) {
+    zipProgressModal.addEventListener("click", (e) => {
+      if (e.target === zipProgressModal) cancelZipDownload();
+    });
+  }
+
   // ESC key closes modals
   window.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
       previewModal.classList.add("hidden");
       qrModal.classList.add("hidden");
+      if (zipProgressModal && !zipProgressModal.classList.contains("hidden")) {
+        cancelZipDownload();
+      }
     }
   });
 }

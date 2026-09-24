@@ -11,9 +11,13 @@ import mimetypes
 import os
 import queue
 import sys
+import tempfile
+import threading
 import time
+import uuid
 import zipfile
 from pathlib import Path
+from typing import Any, Dict, Optional
 from flask import (
     Flask,
     Response,
@@ -23,6 +27,13 @@ from flask import (
     send_file,
 )
 from flask_cors import CORS
+
+PRECOMPRESSED_EXTENSIONS = {
+    ".mp4", ".mkv", ".webm", ".avi", ".mov", ".flv", ".wmv", ".m4v",
+    ".jpg", ".jpeg", ".png", ".gif", ".webp", ".heic", ".heif",
+    ".zip", ".tar", ".gz", ".7z", ".rar", ".bz2", ".xz", ".iso",
+    ".mp3", ".wav", ".ogg", ".m4a", ".flac", ".aac"
+}
 
 from core.config import config
 from core.mesh import MeshManager
@@ -114,6 +125,10 @@ class LandropServer:
         if not self.mesh or self.mesh.role == "leader":
             self.broadcaster.start()
 
+        # Active background ZIP packaging jobs
+        self.zip_jobs: Dict[str, Dict[str, Any]] = {}
+        self.zip_jobs_lock = threading.Lock()
+
         self._register_routes()
 
     def shutdown(self):
@@ -126,6 +141,117 @@ class LandropServer:
         if hasattr(self, "broadcaster") and self.broadcaster:
             try:
                 self.broadcaster.stop()
+            except Exception:
+                pass
+        if hasattr(self, "zip_jobs_lock"):
+            with self.zip_jobs_lock:
+                for job in self.zip_jobs.values():
+                    temp_path = job.get("temp_path")
+                    if temp_path and os.path.exists(temp_path):
+                        try:
+                            os.remove(temp_path)
+                        except Exception:
+                            pass
+                self.zip_jobs.clear()
+
+    def _cleanup_old_zip_jobs(self):
+        """Removes zip jobs older than 30 minutes to prevent temp disk buildup."""
+        now = time.time()
+        to_delete = []
+        with self.zip_jobs_lock:
+            for jid, job in self.zip_jobs.items():
+                if now - job.get("created_at", now) > 1800:
+                    to_delete.append((jid, job.get("temp_path")))
+            for jid, temp_path in to_delete:
+                self.zip_jobs.pop(jid, None)
+                if temp_path and os.path.exists(temp_path):
+                    try:
+                        os.remove(temp_path)
+                    except Exception:
+                        pass
+
+    def _run_zip_worker(self, job_id: str, real_target: str, temp_zip_path: str, files_list: list):
+        """Worker thread to compress files into temp_zip_path while tracking progress."""
+        try:
+            with zipfile.ZipFile(temp_zip_path, "w", allowZip64=True) as zip_file:
+                for file_path, archive_name, f_size in files_list:
+                    with self.zip_jobs_lock:
+                        job = self.zip_jobs.get(job_id)
+                        if not job or job.get("cancel_event", threading.Event()).is_set():
+                            break
+                        job["current_file"] = os.path.basename(file_path)
+
+                    ext = os.path.splitext(file_path)[1].lower()
+                    compress_type = zipfile.ZIP_STORED if ext in PRECOMPRESSED_EXTENSIONS else zipfile.ZIP_DEFLATED
+
+                    try:
+                        if f_size <= 1024 * 512:
+                            zip_file.write(file_path, archive_name, compress_type=compress_type)
+                            with self.zip_jobs_lock:
+                                job = self.zip_jobs.get(job_id)
+                                if job:
+                                    job["processed_bytes"] += f_size
+                                    if job["total_bytes"] > 0:
+                                        job["percent"] = min(99.0, round((job["processed_bytes"] / job["total_bytes"]) * 100, 1))
+                                    elif job["total_files"] > 0:
+                                        job["percent"] = min(99.0, round((job["processed_files"] / job["total_files"]) * 100, 1))
+                        else:
+                            chunk_size = 1024 * 512
+                            with open(file_path, "rb") as src, zip_file.open(archive_name, "w", compress_type=compress_type) as dst:
+                                while True:
+                                    with self.zip_jobs_lock:
+                                        job = self.zip_jobs.get(job_id)
+                                        if not job or job.get("cancel_event", threading.Event()).is_set():
+                                            break
+                                    chunk = src.read(chunk_size)
+                                    if not chunk:
+                                        break
+                                    dst.write(chunk)
+                                    with self.zip_jobs_lock:
+                                        job = self.zip_jobs.get(job_id)
+                                        if job:
+                                            job["processed_bytes"] += len(chunk)
+                                            if job["total_bytes"] > 0:
+                                                job["percent"] = min(99.0, round((job["processed_bytes"] / job["total_bytes"]) * 100, 1))
+                    except (PermissionError, OSError):
+                        with self.zip_jobs_lock:
+                            job = self.zip_jobs.get(job_id)
+                            if job:
+                                job["processed_bytes"] += f_size
+                        continue
+
+                    with self.zip_jobs_lock:
+                        job = self.zip_jobs.get(job_id)
+                        if job:
+                            job["processed_files"] += 1
+                            if job.get("cancel_event", threading.Event()).is_set():
+                                break
+
+            with self.zip_jobs_lock:
+                job = self.zip_jobs.get(job_id)
+                if job:
+                    if job.get("cancel_event", threading.Event()).is_set():
+                        job["status"] = "cancelled"
+                        try:
+                            if os.path.exists(temp_zip_path):
+                                os.remove(temp_zip_path)
+                        except Exception:
+                            pass
+                    else:
+                        job["status"] = "completed"
+                        job["percent"] = 100.0
+                        job["processed_files"] = len(files_list)
+                        job["processed_bytes"] = job["total_bytes"]
+                        job["current_file"] = "Complete"
+        except Exception as e:
+            with self.zip_jobs_lock:
+                job = self.zip_jobs.get(job_id)
+                if job:
+                    job["status"] = "error"
+                    job["error"] = str(e)
+            try:
+                if os.path.exists(temp_zip_path):
+                    os.remove(temp_zip_path)
             except Exception:
                 pass
 
@@ -400,9 +526,156 @@ class LandropServer:
             mime_type, _ = mimetypes.guess_type(real_target)
             return send_file(real_target, mimetype=mime_type or "application/octet-stream", conditional=True)
 
+        @app.route("/api/safelist/prepare-zip", methods=["POST"])
+        def api_safelist_prepare_zip():
+            """Starts background job to package a Safe List folder or subfolder into a ZIP."""
+            data = request.get_json(silent=True) or request.form or {}
+            folder_id = data.get("folder_id", "")
+            subpath = data.get("subpath", "")
+
+            try:
+                real_target = config.resolve_safe_path(folder_id, subpath)
+            except Exception as e:
+                return jsonify({"error": str(e)}), 403
+
+            if not os.path.isdir(real_target):
+                return jsonify({"error": "Not a directory"}), 400
+
+            self._cleanup_old_zip_jobs()
+
+            folder_name = os.path.basename(real_target) or "shared_folder"
+
+            # Pre-scan directory to determine total file count and byte size
+            files_list = []
+            total_bytes = 0
+            for root, _, filenames in os.walk(real_target):
+                for filename in filenames:
+                    file_path = os.path.join(root, filename)
+                    try:
+                        f_size = os.path.getsize(file_path)
+                    except OSError:
+                        f_size = 0
+                    archive_name = os.path.relpath(file_path, real_target)
+                    files_list.append((file_path, archive_name, f_size))
+                    total_bytes += f_size
+
+            job_id = str(uuid.uuid4())
+            temp_zip_path = os.path.join(tempfile.gettempdir(), f"landrop_zip_{job_id}.zip")
+            cancel_event = threading.Event()
+
+            with self.zip_jobs_lock:
+                self.zip_jobs[job_id] = {
+                    "job_id": job_id,
+                    "folder_name": folder_name,
+                    "temp_path": temp_zip_path,
+                    "status": "processing",
+                    "error": None,
+                    "total_files": len(files_list),
+                    "processed_files": 0,
+                    "total_bytes": total_bytes,
+                    "processed_bytes": 0,
+                    "percent": 0.0,
+                    "current_file": "Initializing...",
+                    "created_at": time.time(),
+                    "cancel_event": cancel_event,
+                }
+
+            # Spawn background thread to create the zip file with live progress tracking
+            worker_thread = threading.Thread(
+                target=self._run_zip_worker,
+                args=(job_id, real_target, temp_zip_path, files_list),
+                daemon=True,
+            )
+            worker_thread.start()
+
+            return jsonify({
+                "success": True,
+                "job_id": job_id,
+                "folder_name": folder_name,
+                "total_files": len(files_list),
+                "total_bytes": total_bytes,
+            })
+
+        @app.route("/api/safelist/zip-progress")
+        def api_safelist_zip_progress():
+            """Returns real-time compression progress for an active packaging job."""
+            job_id = request.args.get("job_id", "")
+            with self.zip_jobs_lock:
+                job = self.zip_jobs.get(job_id)
+                if not job:
+                    return jsonify({"error": "Job not found"}), 404
+
+                return jsonify({
+                    "job_id": job["job_id"],
+                    "folder_name": job["folder_name"],
+                    "status": job["status"],
+                    "percent": job["percent"],
+                    "processed_files": job["processed_files"],
+                    "total_files": job["total_files"],
+                    "processed_bytes": job["processed_bytes"],
+                    "total_bytes": job["total_bytes"],
+                    "current_file": job.get("current_file", ""),
+                    "error": job.get("error"),
+                })
+
+        @app.route("/api/safelist/cancel-zip", methods=["POST"])
+        def api_safelist_cancel_zip():
+            """Aborts an active packaging job and cleans up temp files."""
+            data = request.get_json(silent=True) or request.form or {}
+            job_id = data.get("job_id", "")
+            with self.zip_jobs_lock:
+                job = self.zip_jobs.get(job_id)
+                if job:
+                    job["cancel_event"].set()
+                    job["status"] = "cancelled"
+                    temp_path = job.get("temp_path")
+                    if temp_path and os.path.exists(temp_path):
+                        try:
+                            os.remove(temp_path)
+                        except Exception:
+                            pass
+            return jsonify({"success": True})
+
+        @app.route("/api/safelist/download-zip-file")
+        def api_safelist_download_zip_file():
+            """Transfers the completed ZIP file created by a background job."""
+            job_id = request.args.get("job_id", "")
+            with self.zip_jobs_lock:
+                job = self.zip_jobs.get(job_id)
+                if not job:
+                    return jsonify({"error": "Job not found"}), 404
+                if job["status"] != "completed":
+                    return jsonify({"error": f"Job not ready (status: {job['status']})"}), 400
+                temp_path = job["temp_path"]
+                folder_name = job["folder_name"]
+
+            if not os.path.exists(temp_path):
+                return jsonify({"error": "Archive file not found on disk"}), 404
+
+            self.log_activity(f"Folder downloaded as ZIP: {folder_name} by {request.remote_addr}")
+
+            def delayed_cleanup():
+                time.sleep(120)  # Wait 2 minutes for download stream to finish
+                try:
+                    if os.path.exists(temp_path):
+                        os.remove(temp_path)
+                except Exception:
+                    pass
+                with self.zip_jobs_lock:
+                    self.zip_jobs.pop(job_id, None)
+
+            threading.Thread(target=delayed_cleanup, daemon=True).start()
+
+            return send_file(
+                temp_path,
+                mimetype="application/zip",
+                as_attachment=True,
+                download_name=f"{folder_name}.zip",
+            )
+
         @app.route("/api/safelist/download-zip")
         def api_safelist_download_zip():
-            """Packs a Safe List folder or subfolder into a ZIP and sends it."""
+            """Packs a Safe List folder or subfolder into a ZIP and sends it (synchronous / fallback)."""
             folder_id = request.args.get("folder_id", "")
             subpath = request.args.get("subpath", "")
 
@@ -415,26 +688,47 @@ class LandropServer:
                 return jsonify({"error": "Not a directory"}), 400
 
             folder_name = os.path.basename(real_target) or "shared_folder"
-            zip_buffer = io.BytesIO()
+            temp_zip = tempfile.NamedTemporaryFile(delete=False, suffix=".zip")
+            temp_zip.close()
 
-            with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
-                for root, _, filenames in os.walk(real_target):
-                    for filename in filenames:
-                        file_path = os.path.join(root, filename)
-                        archive_name = os.path.relpath(file_path, real_target)
-                        try:
-                            zip_file.write(file_path, archive_name)
-                        except (PermissionError, OSError):
-                            continue
+            try:
+                with zipfile.ZipFile(temp_zip.name, "w", allowZip64=True) as zip_file:
+                    for root, _, filenames in os.walk(real_target):
+                        for filename in filenames:
+                            file_path = os.path.join(root, filename)
+                            archive_name = os.path.relpath(file_path, real_target)
+                            ext = os.path.splitext(filename)[1].lower()
+                            c_type = zipfile.ZIP_STORED if ext in PRECOMPRESSED_EXTENSIONS else zipfile.ZIP_DEFLATED
+                            try:
+                                zip_file.write(file_path, archive_name, compress_type=c_type)
+                            except (PermissionError, OSError):
+                                continue
 
-            zip_buffer.seek(0)
-            self.log_activity(f"Folder downloaded as ZIP: {folder_name} by {request.remote_addr}")
-            return send_file(
-                zip_buffer,
-                mimetype="application/zip",
-                as_attachment=True,
-                download_name=f"{folder_name}.zip",
-            )
+                self.log_activity(f"Folder downloaded as ZIP: {folder_name} by {request.remote_addr}")
+                response = send_file(
+                    temp_zip.name,
+                    mimetype="application/zip",
+                    as_attachment=True,
+                    download_name=f"{folder_name}.zip",
+                )
+
+                def cleanup_sync_temp():
+                    time.sleep(120)
+                    try:
+                        if os.path.exists(temp_zip.name):
+                            os.remove(temp_zip.name)
+                    except Exception:
+                        pass
+
+                threading.Thread(target=cleanup_sync_temp, daemon=True).start()
+                return response
+            except Exception as e:
+                try:
+                    if os.path.exists(temp_zip.name):
+                        os.remove(temp_zip.name)
+                except Exception:
+                    pass
+                return jsonify({"error": str(e)}), 500
 
         # --- Auto-Save Upload Endpoints ---
 
