@@ -464,7 +464,7 @@ class LandropServer:
                 total_bytes = 0
                 with open(dest_path, "wb") as out_file:
                     while True:
-                        chunk = f.stream.read(64 * 1024)
+                        chunk = f.stream.read(1024 * 1024)
                         if not chunk:
                             break
                         out_file.write(chunk)

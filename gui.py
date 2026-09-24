@@ -51,8 +51,8 @@ from PySide6.QtWidgets import (
 )
 from werkzeug.serving import WSGIRequestHandler, make_server
 
-# Prevent hanging connections from blocking server threads
-WSGIRequestHandler.timeout = 15
+# Give large transfers time to recover from brief Wi-Fi stalls.
+WSGIRequestHandler.timeout = 60
 
 from core.autostart import is_autostart_enabled, set_autostart
 from core.config import config
@@ -104,10 +104,10 @@ class ActivityBridge(QObject):
 
 class QRDialog(QDialog):
     """Clean, properly scaled dialog showing QR code for mobile scanning."""
-    def __init__(self, urls, parent=None):
+    def __init__(self, urls, initial_url: str = None, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("LANDrop - Connection QR Code")
-        self.setFixedSize(340, 440)
+        self.setWindowTitle("LANDrop - Mobile Connect & QR Code")
+        self.setFixedSize(380, 450)
         self.setStyleSheet("""
             QDialog {
                 background-color: #0b0f19;
@@ -121,7 +121,7 @@ class QRDialog(QDialog):
                 color: #f8fafc;
                 border: 1px solid rgba(255,255,255,0.12);
                 border-radius: 8px;
-                padding: 7px 14px;
+                padding: 6px 12px;
                 font-weight: 700;
                 font-size: 11px;
             }
@@ -134,34 +134,44 @@ class QRDialog(QDialog):
         if isinstance(urls, dict):
             self.primary_url = urls.get("primary_url", "")
             self.landrop_url = urls.get("landrop_url", "")
+            self.mdns_url = urls.get("mdns_url", self.landrop_url)
         else:
             self.primary_url = str(urls)
             self.landrop_url = str(urls)
+            self.mdns_url = str(urls)
+
+        self.initial_url = initial_url or self.landrop_url
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(20, 18, 20, 18)
-        layout.setSpacing(10)
+        layout.setContentsMargins(22, 20, 22, 20)
+        layout.setSpacing(12)
 
-        info_lbl = QLabel("Scan with your phone camera to connect:")
+        info_lbl = QLabel("Scan with your phone or tablet camera:")
         info_lbl.setAlignment(Qt.AlignCenter)
         info_lbl.setStyleSheet("font-size: 12px; color: #94a3b8; font-weight: 600;")
         layout.addWidget(info_lbl)
 
-        # Toggle row: Direct IP vs Permanent mDNS
+        # 3-way toggle row: Permanent mDNS vs Hostname vs Direct IP
         mode_layout = QHBoxLayout()
-        mode_layout.setSpacing(8)
-        self.btn_mode_direct = QPushButton("Direct IP (Phone)")
-        self.btn_mode_direct.setStyleSheet("background-color: #0284c7; color: #ffffff; border: 1px solid #38bdf8;")
-        self.btn_mode_mdns = QPushButton("Permanent (landrop.local)")
+        mode_layout.setSpacing(6)
+        self.btn_mode_mdns = QPushButton("⭐ Permanent")
+        self.btn_mode_host = QPushButton("🏷️ Hostname")
+        self.btn_mode_direct = QPushButton("📱 Direct IP")
 
-        self.btn_mode_direct.clicked.connect(self._select_direct)
+        self.btn_mode_mdns.setFixedHeight(28)
+        self.btn_mode_host.setFixedHeight(28)
+        self.btn_mode_direct.setFixedHeight(28)
+
         self.btn_mode_mdns.clicked.connect(self._select_mdns)
+        self.btn_mode_host.clicked.connect(self._select_host)
+        self.btn_mode_direct.clicked.connect(self._select_direct)
 
-        mode_layout.addWidget(self.btn_mode_direct)
         mode_layout.addWidget(self.btn_mode_mdns)
+        mode_layout.addWidget(self.btn_mode_host)
+        mode_layout.addWidget(self.btn_mode_direct)
         layout.addLayout(mode_layout)
 
-        self.url_box = QLabel(self.primary_url)
+        self.url_box = QLabel()
         self.url_box.setAlignment(Qt.AlignCenter)
         self.url_box.setStyleSheet("""
             background-color: #131d31;
@@ -180,29 +190,53 @@ class QRDialog(QDialog):
         self.img_container.setStyleSheet("background-color: #ffffff; border-radius: 10px; padding: 10px;")
         layout.addWidget(self.img_container)
 
-        self._update_qr(self.primary_url)
+        # Initial selection
+        if getattr(self, "initial_url", None) == self.primary_url:
+            self._select_direct()
+        elif getattr(self, "initial_url", None) == getattr(self, "mdns_url", None):
+            self._select_host()
+        else:
+            self._select_mdns()
 
         btn_row = QHBoxLayout()
         btn_copy = QPushButton("Copy URL")
+        btn_copy.setFixedHeight(30)
         btn_copy.clicked.connect(self._copy_current)
         btn_row.addWidget(btn_copy)
 
         close_btn = QPushButton("Close")
+        close_btn.setFixedHeight(30)
         close_btn.clicked.connect(self.accept)
         btn_row.addWidget(close_btn)
         layout.addLayout(btn_row)
 
-    def _select_direct(self):
-        self.btn_mode_direct.setStyleSheet("background-color: #0284c7; color: #ffffff; border: 1px solid #38bdf8;")
-        self.btn_mode_mdns.setStyleSheet("background-color: #1e293b; color: #f8fafc; border: 1px solid rgba(255,255,255,0.12);")
-        self.url_box.setText(self.primary_url)
-        self._update_qr(self.primary_url)
-
     def _select_mdns(self):
-        self.btn_mode_mdns.setStyleSheet("background-color: #0284c7; color: #ffffff; border: 1px solid #38bdf8;")
-        self.btn_mode_direct.setStyleSheet("background-color: #1e293b; color: #f8fafc; border: 1px solid rgba(255,255,255,0.12);")
+        active_btn = "background-color: #0284c7; color: #ffffff; border: 1px solid #38bdf8; border-radius: 6px; font-weight: 600; font-size: 11px;"
+        inactive_btn = "background-color: #1e293b; color: #94a3b8; border: 1px solid rgba(255,255,255,0.12); border-radius: 6px; font-weight: 500; font-size: 11px;"
+        self.btn_mode_mdns.setStyleSheet(active_btn)
+        self.btn_mode_host.setStyleSheet(inactive_btn)
+        self.btn_mode_direct.setStyleSheet(inactive_btn)
         self.url_box.setText(self.landrop_url)
         self._update_qr(self.landrop_url)
+
+    def _select_host(self):
+        active_btn = "background-color: #0284c7; color: #ffffff; border: 1px solid #38bdf8; border-radius: 6px; font-weight: 600; font-size: 11px;"
+        inactive_btn = "background-color: #1e293b; color: #94a3b8; border: 1px solid rgba(255,255,255,0.12); border-radius: 6px; font-weight: 500; font-size: 11px;"
+        self.btn_mode_host.setStyleSheet(active_btn)
+        self.btn_mode_mdns.setStyleSheet(inactive_btn)
+        self.btn_mode_direct.setStyleSheet(inactive_btn)
+        url = getattr(self, "mdns_url", self.landrop_url)
+        self.url_box.setText(url)
+        self._update_qr(url)
+
+    def _select_direct(self):
+        active_btn = "background-color: #0284c7; color: #ffffff; border: 1px solid #38bdf8; border-radius: 6px; font-weight: 600; font-size: 11px;"
+        inactive_btn = "background-color: #1e293b; color: #94a3b8; border: 1px solid rgba(255,255,255,0.12); border-radius: 6px; font-weight: 500; font-size: 11px;"
+        self.btn_mode_direct.setStyleSheet(active_btn)
+        self.btn_mode_mdns.setStyleSheet(inactive_btn)
+        self.btn_mode_host.setStyleSheet(inactive_btn)
+        self.url_box.setText(self.primary_url)
+        self._update_qr(self.primary_url)
 
     def _update_qr(self, url: str):
         qr_bytes = generate_qr_png_bytes(url)
@@ -224,7 +258,7 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(780, 620)
 
         # Apply clean, properly-scaled dark theme
-        self.setStyleSheet("""
+        qss = """
             QMainWindow, QWidget#contentWidget {
                 background-color: #080c14;
             }
@@ -335,12 +369,16 @@ class MainWindow(QMainWindow):
                 width: 16px;
                 height: 16px;
                 border-radius: 4px;
-                border: 1px solid rgba(255, 255, 255, 0.25);
+                border: 1.5px solid rgba(255, 255, 255, 0.25);
                 background-color: #131d31;
+            }
+            QCheckBox::indicator:hover {
+                border-color: #38bdf8;
             }
             QCheckBox::indicator:checked {
                 background-color: #10b981;
                 border-color: #10b981;
+                image: url("__CHECKMARK_URL__");
             }
             QScrollBar:vertical {
                 background: transparent;
@@ -358,7 +396,9 @@ class MainWindow(QMainWindow):
             QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
                 height: 0;
             }
-        """)
+        """
+        chk_icon = get_resource_path("assets/checkmark.png").as_posix()
+        self.setStyleSheet(qss.replace("__CHECKMARK_URL__", chk_icon))
 
         # Setup icon
         self.icon_path = get_resource_path("assets/icon.ico")
@@ -409,6 +449,7 @@ class MainWindow(QMainWindow):
         header_layout = QHBoxLayout()
         header_layout.setContentsMargins(0, 0, 0, 4)
         header_layout.setSpacing(10)
+        header_layout.setAlignment(Qt.AlignVCenter)
 
         if self.icon_path.exists():
             icon_lbl = QLabel()
@@ -430,14 +471,15 @@ class MainWindow(QMainWindow):
 
         header_layout.addStretch()
 
-        self.btn_update = QPushButton(f"v{APP_VERSION}")
+        self.btn_update = QPushButton(f"✓ v{APP_VERSION} Latest")
+        self.btn_update.setFixedHeight(30)
         self.btn_update.setStyleSheet("""
             background-color: rgba(56, 189, 248, 0.12);
             border: 1px solid rgba(56, 189, 248, 0.3);
             color: #38bdf8;
             font-weight: 700;
-            border-radius: 14px;
-            padding: 5px 12px;
+            border-radius: 8px;
+            padding: 0px 12px;
             font-size: 11px;
         """)
         self.btn_update.setCursor(Qt.PointingHandCursor)
@@ -446,12 +488,14 @@ class MainWindow(QMainWindow):
         header_layout.addWidget(self.btn_update)
 
         self.status_badge = QLabel("● Online on Wi-Fi")
+        self.status_badge.setFixedHeight(30)
+        self.status_badge.setAlignment(Qt.AlignCenter)
         self.status_badge.setStyleSheet("""
             background-color: rgba(16, 185, 129, 0.12);
             border: 1px solid rgba(16, 185, 129, 0.35);
             color: #34d399;
-            padding: 5px 12px;
-            border-radius: 14px;
+            padding: 0px 12px;
+            border-radius: 8px;
             font-size: 11px;
             font-weight: 700;
         """)
@@ -459,6 +503,16 @@ class MainWindow(QMainWindow):
 
         btn_header_web = QPushButton("Open Web App")
         btn_header_web.setObjectName("primaryBtn")
+        btn_header_web.setFixedHeight(30)
+        btn_header_web.setStyleSheet("""
+            background-color: #0284c7;
+            color: #ffffff;
+            border: none;
+            border-radius: 8px;
+            padding: 0px 14px;
+            font-weight: 600;
+            font-size: 12px;
+        """)
         btn_header_web.setMinimumWidth(115)
         btn_header_web.clicked.connect(self._open_browser)
         header_layout.addWidget(btn_header_web)
@@ -472,28 +526,53 @@ class MainWindow(QMainWindow):
         conn_card.setProperty("class", "card")
         conn_layout = QVBoxLayout(conn_card)
         conn_layout.setContentsMargins(18, 16, 18, 16)
-        conn_layout.setSpacing(8)
+        conn_layout.setSpacing(10)
 
         card_title_row = QHBoxLayout()
         card_title = QLabel("📡 Connection Address")
         card_title.setProperty("class", "card-title")
         card_title_row.addWidget(card_title)
 
-        perm_badge = QLabel("Direct IP & mDNS")
+        perm_badge = QLabel("Permanent mDNS + Direct IP")
         perm_badge.setStyleSheet("background-color: rgba(56, 189, 248, 0.15); color: #38bdf8; font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 8px;")
         card_title_row.addWidget(perm_badge)
         card_title_row.addStretch()
         conn_layout.addLayout(card_title_row)
 
-        card_subtitle = QLabel("Scan the QR code or open the link below on your phone to transfer files immediately:")
+        card_subtitle = QLabel("Open the link or scan the QR code on your phone/tablet to transfer files immediately:")
         card_subtitle.setProperty("class", "card-subtitle")
         conn_layout.addWidget(card_subtitle)
+
+        # 3-Mode Selector Row: Permanent vs Hostname vs Direct IP
+        mode_btn_row = QHBoxLayout()
+        mode_btn_row.setSpacing(8)
+
+        self.btn_addr_perm = QPushButton("⭐ Permanent (landrop.local)")
+        self.btn_addr_perm.setFixedHeight(28)
+        self.btn_addr_perm.setCursor(Qt.PointingHandCursor)
+        self.btn_addr_perm.clicked.connect(lambda: self._set_addr_mode("perm"))
+        mode_btn_row.addWidget(self.btn_addr_perm)
+
+        self.btn_addr_host = QPushButton("🏷️ Hostname (.local)")
+        self.btn_addr_host.setFixedHeight(28)
+        self.btn_addr_host.setCursor(Qt.PointingHandCursor)
+        self.btn_addr_host.clicked.connect(lambda: self._set_addr_mode("host"))
+        mode_btn_row.addWidget(self.btn_addr_host)
+
+        self.btn_addr_ip = QPushButton("📱 Direct IP")
+        self.btn_addr_ip.setFixedHeight(28)
+        self.btn_addr_ip.setCursor(Qt.PointingHandCursor)
+        self.btn_addr_ip.clicked.connect(lambda: self._set_addr_mode("ip"))
+        mode_btn_row.addWidget(self.btn_addr_ip)
+
+        mode_btn_row.addStretch()
+        conn_layout.addLayout(mode_btn_row)
 
         # Input + Buttons in a clean, non-wrapping row
         addr_row = QHBoxLayout()
         addr_row.setSpacing(8)
 
-        self.url_label = QLineEdit("http://127.0.0.1:5000")
+        self.url_label = QLineEdit("http://landrop.local:5000")
         self.url_label.setReadOnly(True)
         self.url_label.setStyleSheet("""
             background-color: #131d31;
@@ -794,10 +873,10 @@ class MainWindow(QMainWindow):
             self.active_primary_url = urls["primary_url"]
             self.active_mdns_url = urls["mdns_url"]
 
-            # Prioritize Direct IP for reliable phone connection
-            self.url_label.setText(urls["primary_url"])
-            self.ip_subtext.setText(f"Direct IP: {urls['primary_url']}  •  Permanent: {urls['landrop_url']}  •  Hostname: {urls['mdns_url']}")
-            self._append_log(f"Server started on port {actual_port}. Direct IP: {urls['primary_url']}.", "info")
+            self.btn_addr_host.setText(f"🏷️ {urls['hostname']}.local")
+            self.btn_addr_ip.setText(f"📱 Direct IP ({urls['primary_ip']})")
+            self._set_addr_mode("perm")
+            self._append_log(f"Server started on port {actual_port}. Permanent address: {urls['landrop_url']}.", "info")
 
             # Initialize mesh status display
             if self.server_instance.mesh:
@@ -810,6 +889,29 @@ class MainWindow(QMainWindow):
             self._check_updates_async(manual=False)
         except Exception as e:
             QMessageBox.critical(self, "Server Error", f"Failed to start server: {e}")
+
+    def _set_addr_mode(self, mode: str):
+        """Switches displayed URL between Permanent (landrop.local), Hostname, and Direct IP."""
+        self.current_addr_mode = mode
+        active_btn = "background-color: #0284c7; color: #ffffff; border: 1px solid #38bdf8; border-radius: 6px; font-weight: 600; font-size: 11px; padding: 2px 10px;"
+        inactive_btn = "background-color: #131d31; color: #94a3b8; border: 1px solid rgba(255,255,255,0.1); border-radius: 6px; font-weight: 500; font-size: 11px; padding: 2px 10px;"
+
+        self.btn_addr_perm.setStyleSheet(active_btn if mode == "perm" else inactive_btn)
+        self.btn_addr_host.setStyleSheet(active_btn if mode == "host" else inactive_btn)
+        self.btn_addr_ip.setStyleSheet(active_btn if mode == "ip" else inactive_btn)
+
+        if mode == "perm":
+            url = getattr(self, "active_landrop_url", "http://landrop.local:5000")
+            desc = "⭐ Permanent address: Never changes even if router reassigns your IP. Works on iPhone, iPad, Mac & Windows."
+        elif mode == "host":
+            url = getattr(self, "active_mdns_url", "http://landrop.local:5000")
+            desc = "🏷️ Hostname address: Permanent local address mapped to your computer name via native Windows mDNS."
+        else:
+            url = getattr(self, "active_primary_url", "http://127.0.0.1:5000")
+            desc = "📱 Direct numeric IP: Use if an older device does not support .local mDNS names."
+
+        self.url_label.setText(url)
+        self.ip_subtext.setText(desc)
 
     def _configure_firewall(self):
         """Allows LANDrop through Windows Firewall with a single click."""
@@ -853,12 +955,13 @@ class MainWindow(QMainWindow):
         if res.get("update_available"):
             latest = res.get("latest_version")
             self.btn_update.setText(f"🚀 Update v{latest} Available")
+            self.btn_update.setFixedHeight(30)
             self.btn_update.setStyleSheet("""
                 background-color: #f59e0b;
                 color: #0b0f19;
                 font-weight: 800;
-                border-radius: 14px;
-                padding: 5px 12px;
+                border-radius: 8px;
+                padding: 0px 12px;
                 font-size: 11px;
                 border: 1px solid #fbbf24;
             """)
@@ -880,13 +983,14 @@ class MainWindow(QMainWindow):
                     webbrowser.open(res.get("release_url", RELEASES_URL))
         else:
             self.btn_update.setText(f"✓ v{APP_VERSION} Latest")
+            self.btn_update.setFixedHeight(30)
             self.btn_update.setStyleSheet("""
                 background-color: rgba(56, 189, 248, 0.12);
                 border: 1px solid rgba(56, 189, 248, 0.3);
                 color: #38bdf8;
                 font-weight: 700;
-                border-radius: 14px;
-                padding: 5px 12px;
+                border-radius: 8px;
+                padding: 0px 12px;
                 font-size: 11px;
             """)
             self.btn_update.setToolTip(f"You are running the latest version (v{APP_VERSION}). Click to re-check.")
@@ -923,7 +1027,7 @@ class MainWindow(QMainWindow):
 
     def _show_qr(self):
         urls = getattr(self, "active_urls", self.url_label.text())
-        dlg = QRDialog(urls, self)
+        dlg = QRDialog(urls, initial_url=self.url_label.text(), parent=self)
         dlg.exec()
 
     def _on_mesh_updated(self, role: str, nodes: list):

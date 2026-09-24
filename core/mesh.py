@@ -17,7 +17,7 @@ from core.network import get_hostname, get_local_ip
 
 MESH_DISCOVERY_PORT = 5005
 HEARTBEAT_INTERVAL = 3.0
-NODE_TIMEOUT = 10.0
+NODE_TIMEOUT = 30.0
 
 
 class MeshNode:
@@ -282,9 +282,9 @@ class MeshManager:
                             missed_leader_heartbeats = 0
                 except Exception:
                     missed_leader_heartbeats += 1
-                    print(f"  [Mesh] Missed heartbeat to Leader ({missed_leader_heartbeats}/3)")
+                    print(f"  [Mesh] Missed heartbeat to Leader ({missed_leader_heartbeats}/5)")
 
-                    if missed_leader_heartbeats >= 3:
+                    if missed_leader_heartbeats >= 5:
                         print("  [Mesh] Leader is unreachable! Promoting self to Primary Leader.")
                         self.promote_to_leader()
 

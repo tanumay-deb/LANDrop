@@ -65,7 +65,8 @@ def run_headless(port: int = 5000):
 
     try:
         from werkzeug.serving import WSGIRequestHandler
-        WSGIRequestHandler.timeout = 15
+        # Give large transfers time to recover from brief Wi-Fi stalls.
+        WSGIRequestHandler.timeout = 60
         server.app.run(host="0.0.0.0", port=actual_port, threaded=True)
     except KeyboardInterrupt:
         print("\n  Shutting down LANDrop server...")
