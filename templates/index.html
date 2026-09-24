@@ -266,30 +266,12 @@
           </div>
         </div>
 
-        <!-- Live Upload Progress Card -->
-        <div class="progress-card hidden" id="uploadProgressCard">
-          <div class="progress-header">
-            <div class="progress-file-info">
-              <span class="progress-filename" id="progressFileName">Uploading...</span>
-              <span class="progress-speed" id="progressSpeed">0 MB/s</span>
-            </div>
-            <span class="progress-pct" id="progressPct">0%</span>
+                <!-- Transfer Manager Container -->
+        <div class="transfer-manager hidden" id="transferManagerCard">
+          <div class="transfer-manager-header">
+             <h4 class="subheading">Active Transfers</h4>
           </div>
-          <div class="progress-bar-bg">
-            <div class="progress-bar-fill" id="progressBarFill"></div>
-          </div>
-          <div class="progress-meta">
-            <span id="progressTransferred">0 MB / 0 MB</span>
-            <span id="progressEta">ETA: Calculating...</span>
-          </div>
-        </div>
-
-        <!-- Sent Files History List in this session -->
-        <div class="sent-history" id="sentHistoryContainer">
-          <h4 class="subheading">Recently Sent in this Session</h4>
-          <div class="sent-list" id="sentList">
-            <div class="empty-sent">No files uploaded yet in this session.</div>
-          </div>
+          <div id="activeTransfersList" class="transfers-list"></div>
         </div>
       </div>
     </section>

@@ -867,12 +867,65 @@ function setupUploadEvents() {
     });
   });
 
-  dropzone.addEventListener("drop", (e) => {
-    const dt = e.dataTransfer;
-    if (dt && dt.files && dt.files.length > 0) {
-      uploadFiles(Array.from(dt.files));
-    }
-  });
+  
+    dropzone.addEventListener("drop", async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      dropzone.classList.remove("drag-over");
+      const dt = e.dataTransfer;
+      if (dt && dt.items && dt.items.length > 0) {
+        let files = [];
+        let dirs = [];
+        for (let i = 0; i < dt.items.length; i++) {
+          const item = dt.items[i];
+          if (item.kind === 'file') {
+            if (typeof item.webkitGetAsEntry === 'function') {
+              const entry = item.webkitGetAsEntry();
+              if (entry) {
+                await traverseFileTree(entry, "", files, dirs);
+              }
+            } else {
+              files.push(item.getAsFile());
+              dirs.push("");
+            }
+          }
+        }
+        if (files.length > 0) {
+          uploadFiles(files, dirs);
+        }
+      } else if (dt && dt.files && dt.files.length > 0) {
+        uploadFiles(Array.from(dt.files), new Array(dt.files.length).fill(""));
+      }
+    });
+
+  function traverseFileTree(item, path, fileArr, dirArr) {
+    return new Promise((resolve) => {
+      if (item.isFile) {
+        item.file((file) => {
+          fileArr.push(file);
+          dirArr.push(path);
+          resolve();
+        });
+      } else if (item.isDirectory) {
+        const dirReader = item.createReader();
+        const promises = [];
+        const readEntries = () => {
+          dirReader.readEntries((entries) => {
+            if (entries.length === 0) {
+              Promise.all(promises).then(resolve);
+            } else {
+              for (let i = 0; i < entries.length; i++) {
+                promises.push(traverseFileTree(entries[i], path + item.name + "/", fileArr, dirArr));
+              }
+              readEntries();
+            }
+          });
+        };
+        readEntries();
+      }
+    });
+  }
+
 }
 
 function formatBytes(bytes) {
@@ -957,17 +1010,180 @@ function renderMeshNodesUI(role, nodes) {
   }
 }
 
+
+// --- Transfer Manager ---
+class TransferManager {
+  constructor() {
+    this.activeTransfers = new Map();
+    this.container = document.getElementById("transferManagerCard");
+    this.list = document.getElementById("activeTransfersList");
+  }
+
+  addTransfer(sessionId, filename, file, uploadUrl, targetName, relativeDir) {
+    if (this.container.classList.contains("hidden")) {
+      this.container.classList.remove("hidden");
+    }
+
+    const card = document.createElement("div");
+    card.className = "transfer-item";
+    card.id = `transfer-${sessionId}`;
+    
+    card.innerHTML = `
+      <div class="transfer-info">
+        <div class="transfer-name">${filename} ${relativeDir ? '('+relativeDir+')' : ''}</div>
+        <div class="transfer-stats">
+          <span id="speed-${sessionId}">0 MB/s</span>
+          <span id="eta-${sessionId}">ETA: ...</span>
+        </div>
+      </div>
+      <div class="transfer-progress">
+        <div class="transfer-bar-bg">
+          <div class="transfer-bar-fill" id="bar-${sessionId}"></div>
+        </div>
+        <div class="transfer-actions">
+          <button id="pause-${sessionId}" class="btn-pause">Pause</button>
+          <button id="cancel-${sessionId}" class="btn-cancel">Cancel</button>
+        </div>
+      </div>
+    `;
+    this.list.appendChild(card);
+
+    const transfer = {
+      sessionId, filename, file, uploadUrl, targetName, relativeDir,
+      chunkSize: 1024 * 1024,
+      totalChunks: Math.ceil(file.size / (1024 * 1024)),
+      currentChunk: 0,
+      paused: false,
+      cancelled: false,
+      startTime: Date.now(),
+      xhr: null,
+      card,
+      speedEl: card.querySelector(`#speed-${sessionId}`),
+      etaEl: card.querySelector(`#eta-${sessionId}`),
+      barEl: card.querySelector(`#bar-${sessionId}`),
+      pauseBtn: card.querySelector(`#pause-${sessionId}`),
+      cancelBtn: card.querySelector(`#cancel-${sessionId}`)
+    };
+
+    transfer.pauseBtn.addEventListener("click", () => this.togglePause(sessionId));
+    transfer.cancelBtn.addEventListener("click", () => this.cancelTransfer(sessionId));
+
+    this.activeTransfers.set(sessionId, transfer);
+    this.uploadNextChunk(sessionId);
+  }
+
+  togglePause(sessionId) {
+    const t = this.activeTransfers.get(sessionId);
+    if (!t) return;
+    t.paused = !t.paused;
+    t.pauseBtn.innerText = t.paused ? "Resume" : "Pause";
+    if (t.paused && t.xhr) {
+      t.xhr.abort();
+    } else if (!t.paused) {
+      this.uploadNextChunk(sessionId);
+    }
+  }
+
+  cancelTransfer(sessionId) {
+    const t = this.activeTransfers.get(sessionId);
+    if (!t) return;
+    t.cancelled = true;
+    if (t.xhr) t.xhr.abort();
+    t.card.remove();
+    this.activeTransfers.delete(sessionId);
+    if (this.activeTransfers.size === 0) {
+      this.container.classList.add("hidden");
+    }
+  }
+
+  uploadNextChunk(sessionId) {
+    const t = this.activeTransfers.get(sessionId);
+    if (!t || t.paused || t.cancelled) return;
+
+    const start = t.currentChunk * t.chunkSize;
+    const end = Math.min(start + t.chunkSize, t.file.size);
+    const chunk = t.file.slice(start, end);
+
+    const formData = new FormData();
+    formData.append("session_id", t.sessionId);
+    formData.append("filename", t.filename);
+    formData.append("chunk_index", t.currentChunk);
+    formData.append("total_chunks", t.totalChunks);
+    formData.append("relative_dir", t.relativeDir);
+    formData.append("file", chunk);
+
+    t.xhr = new XMLHttpRequest();
+    // replace /api/upload with /api/upload/chunk
+    const chunkUrl = t.uploadUrl.replace("/api/upload", "/api/upload/chunk");
+    t.xhr.open("POST", chunkUrl);
+    
+    t.xhr.upload.addEventListener("progress", (e) => {
+      if (e.lengthComputable) {
+        const totalLoaded = start + e.loaded;
+        const pct = Math.round((totalLoaded / t.file.size) * 100);
+        t.barEl.style.width = pct + "%";
+        
+        const elapsedSec = (Date.now() - t.startTime) / 1000;
+        if (elapsedSec > 0.5) {
+          const bps = totalLoaded / elapsedSec;
+          t.speedEl.innerText = `${formatBytes(bps)}/s`;
+          const remaining = t.file.size - totalLoaded;
+          t.etaEl.innerText = `ETA: ${Math.round(remaining / bps)}s`;
+        }
+      }
+    });
+
+    t.xhr.addEventListener("load", () => {
+      if (t.xhr.status >= 200 && t.xhr.status < 300) {
+        const resp = JSON.parse(t.xhr.responseText);
+        if (resp.completed) {
+          showToast(`✓ Uploaded ${t.filename}`, "success");
+          t.card.remove();
+          this.activeTransfers.delete(sessionId);
+          if (this.activeTransfers.size === 0) {
+            this.container.classList.add("hidden");
+          }
+          if (resp.file) addSentHistoryItem(resp.file);
+          fetchReceivedFiles();
+        } else {
+          t.currentChunk++;
+          this.uploadNextChunk(sessionId);
+        }
+      } else {
+        t.speedEl.innerText = "Error";
+        t.speedEl.style.color = "red";
+        t.paused = true;
+        t.pauseBtn.innerText = "Retry";
+      }
+    });
+
+    t.xhr.addEventListener("error", () => {
+      t.speedEl.innerText = "Error";
+      t.speedEl.style.color = "red";
+      t.paused = true;
+      t.pauseBtn.innerText = "Retry";
+    });
+
+    t.xhr.send(formData);
+  }
+}
+
+const transferManager = new TransferManager();
+
+function uuidv4() {
+  return "10000000-1000-4000-8000-100000000000".replace(/[018]/g, c =>
+    (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16)
+  );
+}
+
 // --- Send Files (Auto-Save Upload) ---
 
-function uploadFiles(files) {
+function uploadFiles(files, relativeDirs = []) {
   if (!files || files.length === 0) return;
 
   let targets = [];
   if (selectedTargetNodeId === "all" && meshNodes.length > 0) {
-    targets = meshNodes.map((n) => ({
-      url: `${n.url}/api/upload`,
-      name: n.name,
-    }));
+    targets = meshNodes.map((n) => ({ url: `${n.url}/api/upload`, name: n.name }));
   } else if (selectedTargetNodeId !== "self" && meshNodes.length > 0) {
     const targetNode = meshNodes.find((n) => n.id === selectedTargetNodeId);
     if (targetNode) {
@@ -979,94 +1195,15 @@ function uploadFiles(files) {
     targets = [{ url: "/api/upload", name: "host PC" }];
   }
 
-  targets.forEach((target, index) => {
-    executeUpload(files, target.url, target.name, index === 0);
+  targets.forEach((target) => {
+    files.forEach((file, idx) => {
+      const sessionId = uuidv4();
+      const relDir = relativeDirs[idx] || "";
+      transferManager.addTransfer(sessionId, file.name, file, target.url, target.name, relDir);
+    });
   });
 }
 
-function executeUpload(files, uploadUrl, targetName, showProgressUI) {
-  if (showProgressUI) {
-    uploadProgressCard.classList.remove("hidden");
-    progressBarFill.style.width = "0%";
-    progressPct.innerText = "0%";
-  }
-
-  const formData = new FormData();
-  let totalBytes = 0;
-
-  files.forEach((f) => {
-    formData.append("files", f);
-    totalBytes += f.size;
-  });
-
-  const label =
-    files.length === 1
-      ? files[0].name
-      : `${files.length} files (${formatBytes(totalBytes)})`;
-  if (showProgressUI) {
-    progressFileName.innerText = `${label} ➔ ${targetName}`;
-  }
-
-  const startTime = Date.now();
-  const xhr = new XMLHttpRequest();
-
-  xhr.upload.addEventListener("progress", (e) => {
-    if (e.lengthComputable && showProgressUI) {
-      const pct = Math.round((e.loaded / e.total) * 100);
-      progressBarFill.style.width = pct + "%";
-      progressPct.innerText = pct + "%";
-
-      const elapsedSec = (Date.now() - startTime) / 1000;
-      if (elapsedSec > 0.3) {
-        const bytesPerSec = e.loaded / elapsedSec;
-        const mbps = ((bytesPerSec * 8) / (1024 * 1024)).toFixed(0);
-        progressSpeed.innerText = `${formatBytes(bytesPerSec)}/s (${mbps} Mbps)`;
-        const remainingBytes = e.total - e.loaded;
-        const etaSec = Math.round(remainingBytes / bytesPerSec);
-        progressEta.innerText = `ETA: ${etaSec}s`;
-      }
-      progressTransferred.innerText = `${formatBytes(e.loaded)} / ${formatBytes(e.total)}`;
-    }
-  });
-
-  xhr.addEventListener("load", () => {
-    if (xhr.status >= 200 && xhr.status < 300) {
-      const resp = JSON.parse(xhr.responseText);
-      showToast(
-        `✓ Auto-saved ${resp.saved_count} file(s) to ${targetName}! Available in 'Received'.`,
-        "success"
-      );
-
-      if (showProgressUI) {
-        progressBarFill.style.width = "100%";
-        progressPct.innerText = "100%";
-        progressSpeed.innerText = "Completed";
-        progressEta.innerText = `Auto-saved to ${targetName}`;
-
-        if (resp.saved_files) {
-          resp.saved_files.forEach((sf) => addSentHistoryItem(sf));
-        }
-
-        setTimeout(() => {
-          uploadProgressCard.classList.add("hidden");
-        }, 3500);
-
-        fetchReceivedFiles();
-      }
-    } else {
-      showToast(`Upload failed to ${targetName}: ` + xhr.statusText, "error");
-      if (showProgressUI) progressSpeed.innerText = "Failed";
-    }
-  });
-
-  xhr.addEventListener("error", () => {
-    showToast(`Network error uploading to ${targetName}`, "error");
-    if (showProgressUI) progressSpeed.innerText = "Network Error";
-  });
-
-  xhr.open("POST", uploadUrl);
-  xhr.send(formData);
-}
 
 function addSentHistoryItem(fileInfo) {
   const emptySent = sentList.querySelector(".empty-sent");
@@ -1459,4 +1596,30 @@ function setupFaqEvents() {
       }
     });
   }
+}
+
+
+// --- Guest Drop Zone ---
+const btnCreateDropZone = document.getElementById("btnCreateDropZone");
+if (btnCreateDropZone) {
+  btnCreateDropZone.addEventListener("click", async () => {
+    try {
+      const res = await fetch("/api/drop/create", { method: "POST" });
+      if (!res.ok) {
+        showToast("Error creating Drop Zone", "error");
+        return;
+      }
+      const data = await res.json();
+      
+      // Update QR Modal to show the drop zone URL
+      if (qrUrlText) qrUrlText.innerText = data.url;
+      // You could theoretically update the QR image src here, but it's fine for now
+      // Let's just show a toast and open the QR modal
+      showToast("Drop Zone created! Token valid for 24h", "success");
+      
+      if (qrModal) qrModal.classList.remove("hidden");
+    } catch (e) {
+      showToast("Failed to create Drop Zone", "error");
+    }
+  });
 }

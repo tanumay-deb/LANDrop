@@ -732,6 +732,108 @@ class LandropServer:
 
         # --- Auto-Save Upload Endpoints ---
 
+
+        # --- Guest Drop Zone Endpoints ---
+
+        self.active_drop_zones = {}
+
+        @app.route("/api/drop/create", methods=["POST"])
+        def api_drop_create():
+            if not config.auto_save_enabled:
+                return jsonify({"error": "Auto-Save is disabled on host"}), 403
+            token = str(uuid.uuid4())
+            # Token valid for 24 hours
+            expires_at = time.time() + (24 * 3600)
+            self.active_drop_zones[token] = {"expires_at": expires_at}
+            
+            urls = get_connection_urls(self.port)
+            drop_url = f"{urls['landrop_url'] or urls['primary_url']}/drop/{token}"
+            return jsonify({"success": True, "token": token, "url": drop_url})
+
+        @app.route("/drop/<token>")
+        def drop_page(token):
+            if token not in self.active_drop_zones or time.time() > self.active_drop_zones[token]["expires_at"]:
+                return "Drop link expired or invalid", 404
+            return render_template("drop.html", token=token)
+
+        @app.route("/api/drop/<token>/upload/chunk", methods=["POST"])
+        def api_drop_upload_chunk(token):
+            if token not in self.active_drop_zones or time.time() > self.active_drop_zones[token]["expires_at"]:
+                return jsonify({"error": "Drop link expired"}), 403
+
+            session_id = request.form.get("session_id")
+            filename = request.form.get("filename")
+            chunk_index = int(request.form.get("chunk_index", 0))
+            total_chunks = int(request.form.get("total_chunks", 1))
+            relative_dir = request.form.get("relative_dir", "").strip()
+
+            chunk_file = request.files.get("file")
+            if not chunk_file or not session_id or not filename:
+                return jsonify({"error": "Missing parameters"}), 400
+
+            temp_dir = os.path.join(tempfile.gettempdir(), "landrop_uploads")
+            os.makedirs(temp_dir, exist_ok=True)
+            temp_path = os.path.join(temp_dir, f"{session_id}.tmp")
+
+            mode = "ab" if chunk_index > 0 else "wb"
+            with open(temp_path, mode) as f:
+                while True:
+                    data = chunk_file.stream.read(1024 * 1024)
+                    if not data:
+                        break
+                    f.write(data)
+
+            if chunk_index == total_chunks - 1:
+                save_dir = os.path.join(config.save_directory, "Guest Drops")
+                os.makedirs(save_dir, exist_ok=True)
+                
+                if relative_dir and ".." not in relative_dir and not relative_dir.startswith("/"):
+                    dest_dir = os.path.join(save_dir, relative_dir)
+                    os.makedirs(dest_dir, exist_ok=True)
+                    final_path = os.path.join(dest_dir, filename)
+                    base, ext = os.path.splitext(filename)
+                    counter = 1
+                    while os.path.exists(final_path):
+                        final_path = os.path.join(dest_dir, f"{base} ({counter}){ext}")
+                        counter += 1
+                    final_name = os.path.basename(final_path)
+                else:
+                    final_path = os.path.join(save_dir, filename)
+                    base, ext = os.path.splitext(filename)
+                    counter = 1
+                    while os.path.exists(final_path):
+                        final_path = os.path.join(save_dir, f"{base} ({counter}){ext}")
+                        counter += 1
+                    final_name = os.path.basename(final_path)
+
+                import shutil
+                shutil.move(temp_path, final_path)
+                total_bytes = os.path.getsize(final_path)
+
+                file_info = {
+                    "filename": final_name,
+                    "original_name": filename,
+                    "size": total_bytes,
+                    "formatted_size": format_size(total_bytes),
+                    "saved_path": final_path,
+                    "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "category": get_file_type_category(final_name),
+                }
+                self.received_files_history.insert(0, file_info)
+                if len(self.received_files_history) > 100:
+                    self.received_files_history.pop()
+
+                msg = f"Guest dropped '{final_name}' ({format_size(total_bytes)})"
+                self.log_activity(msg, event_type="upload")
+                self.broadcast_event({
+                    "type": "file_received",
+                    "file": file_info,
+                })
+
+                return jsonify({"success": True, "completed": True, "file": file_info})
+            
+            return jsonify({"success": True, "completed": False, "chunk_index": chunk_index})
+
         @app.route("/api/upload", methods=["POST"])
         def api_upload():
             """
@@ -793,6 +895,85 @@ class LandropServer:
                 "saved_count": len(saved_list),
                 "saved_files": saved_list,
             })
+
+
+        @app.route("/api/upload/chunk", methods=["POST"])
+        def api_upload_chunk():
+            if not config.auto_save_enabled:
+                return jsonify({"error": "Auto-Save is disabled on host"}), 403
+
+            session_id = request.form.get("session_id")
+            filename = request.form.get("filename")
+            chunk_index = int(request.form.get("chunk_index", 0))
+            total_chunks = int(request.form.get("total_chunks", 1))
+            relative_dir = request.form.get("relative_dir", "").strip()
+
+            chunk_file = request.files.get("file")
+            if not chunk_file or not session_id or not filename:
+                return jsonify({"error": "Missing parameters"}), 400
+
+            temp_dir = os.path.join(tempfile.gettempdir(), "landrop_uploads")
+            os.makedirs(temp_dir, exist_ok=True)
+            temp_path = os.path.join(temp_dir, f"{session_id}.tmp")
+
+            mode = "ab" if chunk_index > 0 else "wb"
+            with open(temp_path, mode) as f:
+                while True:
+                    data = chunk_file.stream.read(1024 * 1024)
+                    if not data:
+                        break
+                    f.write(data)
+
+            if chunk_index == total_chunks - 1:
+                save_dir = config.save_directory
+                if relative_dir and ".." not in relative_dir and not relative_dir.startswith("/"):
+                    dest_dir = os.path.join(save_dir, relative_dir)
+                    os.makedirs(dest_dir, exist_ok=True)
+                    final_path = os.path.join(dest_dir, filename)
+                    base, ext = os.path.splitext(filename)
+                    counter = 1
+                    while os.path.exists(final_path):
+                        final_path = os.path.join(dest_dir, f"{base} ({counter}){ext}")
+                        counter += 1
+                    final_name = os.path.basename(final_path)
+                else:
+                    final_path, final_name = config.get_unique_filepath(filename)
+
+                import shutil
+                shutil.move(temp_path, final_path)
+                total_bytes = os.path.getsize(final_path)
+
+                file_info = {
+                    "filename": final_name,
+                    "original_name": filename,
+                    "size": total_bytes,
+                    "formatted_size": format_size(total_bytes),
+                    "saved_path": final_path,
+                    "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "category": get_file_type_category(final_name),
+                }
+                self.received_files_history.insert(0, file_info)
+                if len(self.received_files_history) > 100:
+                    self.received_files_history.pop()
+
+                msg = f"Auto-saved '{final_name}' ({format_size(total_bytes)}) from {request.remote_addr}"
+                self.log_activity(msg, event_type="upload")
+                self.broadcast_event({
+                    "type": "file_received",
+                    "file": file_info,
+                })
+
+                return jsonify({"success": True, "completed": True, "file": file_info})
+            
+            return jsonify({"success": True, "completed": False, "chunk_index": chunk_index})
+
+        @app.route("/api/upload/status/<session_id>")
+        def api_upload_status(session_id):
+            temp_path = os.path.join(tempfile.gettempdir(), "landrop_uploads", f"{session_id}.tmp")
+            if os.path.exists(temp_path):
+                size = os.path.getsize(temp_path)
+                return jsonify({"received_bytes": size})
+            return jsonify({"received_bytes": 0})
 
         @app.route("/api/received")
         def api_received():

@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LANDrop - Guest Drop Zone</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+  <link rel="icon" href="/static/favicon.png" type="image/png">
+  <style>
+    body {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      background: var(--bg);
+      padding: 1rem;
+    }
+    .drop-container {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 2rem;
+      width: 100%;
+      max-width: 600px;
+      text-align: center;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    }
+    .dropzone {
+      border: 2px dashed var(--border);
+      border-radius: 8px;
+      padding: 3rem 2rem;
+      margin: 1.5rem 0;
+      transition: all 0.3s;
+      cursor: pointer;
+    }
+    .dropzone.drag-over {
+      border-color: var(--accent-cyan);
+      background: var(--surface-hover);
+    }
+    .btn-select {
+      background: var(--accent-cyan);
+      color: #fff;
+      border: none;
+      padding: 0.75rem 1.5rem;
+      border-radius: 8px;
+      font-weight: 500;
+      cursor: pointer;
+      margin-top: 1rem;
+    }
+  </style>
+</head>
+<body class="theme-dark">
+  <div class="drop-container">
+    <h2>Guest Drop Zone</h2>
+    <p>Drop files here to securely send them to the host.</p>
+    
+    <div id="dropzone" class="dropzone">
+      <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="2" style="margin-bottom:1rem;color:var(--text-dim);">
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+        <polyline points="17 8 12 3 7 8"></polyline>
+        <line x1="12" y1="3" x2="12" y2="15"></line>
+      </svg>
+      <h3>Drag & Drop Files or Folders Here</h3>
+      <input type="file" id="fileInput" multiple style="display:none;">
+      <button class="btn-select" id="btnSelect">Select Files</button>
+    </div>
+
+    <div class="transfer-manager hidden" id="transferManagerCard" style="text-align:left;">
+      <h4 class="subheading">Active Transfers</h4>
+      <div id="activeTransfersList" class="transfers-list"></div>
+    </div>
+  </div>
+
+  <script src="/static/js/app.js"></script>
+  <script>
+    // Minimal script to override targetUrl for drops
+    const token = "{{ token }}";
+    const dropUploadUrl = `/api/drop/${token}/upload`;
+
+    const dropzoneEl = document.getElementById("dropzone");
+    const fileInputEl = document.getElementById("fileInput");
+    const btnSelectEl = document.getElementById("btnSelect");
+
+    btnSelectEl.addEventListener("click", (e) => {
+      e.stopPropagation();
+      fileInputEl.click();
+    });
+
+    fileInputEl.addEventListener("change", () => {
+      if (fileInputEl.files.length > 0) {
+        uploadFilesOverride(Array.from(fileInputEl.files));
+        fileInputEl.value = "";
+      }
+    });
+
+    function uploadFilesOverride(files, relativeDirs = []) {
+      if (!files || files.length === 0) return;
+      files.forEach((file, idx) => {
+        const sessionId = uuidv4();
+        const relDir = relativeDirs[idx] || "";
+        transferManager.addTransfer(sessionId, file.name, file, dropUploadUrl, "Host PC", relDir);
+      });
+    }
+
+    // Replace the global uploadFiles from app.js so drag-and-drop uses our override
+    window.uploadFiles = uploadFilesOverride;
+  </script>
+</body>
+</html>
