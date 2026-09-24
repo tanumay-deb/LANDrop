@@ -760,16 +760,16 @@ class LandropServer:
         def api_drop_upload_chunk(token):
             if token not in self.active_drop_zones or time.time() > self.active_drop_zones[token]["expires_at"]:
                 return jsonify({"error": "Drop link expired"}), 403
-
-            session_id = request.form.get("session_id")
-            filename = request.form.get("filename")
-            chunk_index = int(request.form.get("chunk_index", 0))
-            total_chunks = int(request.form.get("total_chunks", 1))
-            relative_dir = request.form.get("relative_dir", "").strip()
-
-            chunk_file = request.files.get("file")
-            if not chunk_file or not session_id or not filename:
+            from urllib.parse import unquote
+            session_id = request.headers.get("X-Session-Id") or request.form.get("session_id")
+            filename_raw = request.headers.get("X-Filename") or request.form.get("filename")
+            if not session_id or not filename_raw:
                 return jsonify({"error": "Missing parameters"}), 400
+                
+            filename = unquote(filename_raw)
+            chunk_index = int(request.headers.get("X-Chunk-Index", request.form.get("chunk_index", 0)))
+            total_chunks = int(request.headers.get("X-Total-Chunks", request.form.get("total_chunks", 1)))
+            relative_dir = unquote(request.headers.get("X-Relative-Dir", request.form.get("relative_dir", ""))).strip()
 
             temp_dir = os.path.join(tempfile.gettempdir(), "landrop_uploads")
             os.makedirs(temp_dir, exist_ok=True)
@@ -777,11 +777,21 @@ class LandropServer:
 
             mode = "ab" if chunk_index > 0 else "wb"
             with open(temp_path, mode) as f:
-                while True:
-                    data = chunk_file.stream.read(1024 * 1024)
-                    if not data:
-                        break
-                    f.write(data)
+                if request.content_type == "application/octet-stream":
+                    chunk_size = 1024 * 1024 * 4
+                    while True:
+                        data = request.stream.read(chunk_size)
+                        if not data:
+                            break
+                        f.write(data)
+                else:
+                    chunk_file = request.files.get("file")
+                    if chunk_file:
+                        while True:
+                            data = chunk_file.stream.read(1024 * 1024)
+                            if not data:
+                                break
+                            f.write(data)
 
             if chunk_index == total_chunks - 1:
                 save_dir = os.path.join(config.save_directory, "Guest Drops")
@@ -901,16 +911,16 @@ class LandropServer:
         def api_upload_chunk():
             if not config.auto_save_enabled:
                 return jsonify({"error": "Auto-Save is disabled on host"}), 403
-
-            session_id = request.form.get("session_id")
-            filename = request.form.get("filename")
-            chunk_index = int(request.form.get("chunk_index", 0))
-            total_chunks = int(request.form.get("total_chunks", 1))
-            relative_dir = request.form.get("relative_dir", "").strip()
-
-            chunk_file = request.files.get("file")
-            if not chunk_file or not session_id or not filename:
+            from urllib.parse import unquote
+            session_id = request.headers.get("X-Session-Id") or request.form.get("session_id")
+            filename_raw = request.headers.get("X-Filename") or request.form.get("filename")
+            if not session_id or not filename_raw:
                 return jsonify({"error": "Missing parameters"}), 400
+                
+            filename = unquote(filename_raw)
+            chunk_index = int(request.headers.get("X-Chunk-Index", request.form.get("chunk_index", 0)))
+            total_chunks = int(request.headers.get("X-Total-Chunks", request.form.get("total_chunks", 1)))
+            relative_dir = unquote(request.headers.get("X-Relative-Dir", request.form.get("relative_dir", ""))).strip()
 
             temp_dir = os.path.join(tempfile.gettempdir(), "landrop_uploads")
             os.makedirs(temp_dir, exist_ok=True)
@@ -918,11 +928,21 @@ class LandropServer:
 
             mode = "ab" if chunk_index > 0 else "wb"
             with open(temp_path, mode) as f:
-                while True:
-                    data = chunk_file.stream.read(1024 * 1024)
-                    if not data:
-                        break
-                    f.write(data)
+                if request.content_type == "application/octet-stream":
+                    chunk_size = 1024 * 1024 * 4
+                    while True:
+                        data = request.stream.read(chunk_size)
+                        if not data:
+                            break
+                        f.write(data)
+                else:
+                    chunk_file = request.files.get("file")
+                    if chunk_file:
+                        while True:
+                            data = chunk_file.stream.read(1024 * 1024)
+                            if not data:
+                                break
+                            f.write(data)
 
             if chunk_index == total_chunks - 1:
                 save_dir = config.save_directory

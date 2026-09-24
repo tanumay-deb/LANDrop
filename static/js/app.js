@@ -1039,8 +1039,8 @@ class TransferManager {
 
     const transfer = {
       sessionId, filename, file, uploadUrl, targetName, relativeDir,
-      chunkSize: 4 * 1024 * 1024, // 4MB chunks
-      totalChunks: Math.ceil(file.size / (4 * 1024 * 1024)) || 1,
+      chunkSize: 50 * 1024 * 1024, // 50MB chunks
+      totalChunks: Math.ceil(file.size / (50 * 1024 * 1024)) || 1,
       currentChunk: 0,
       paused: false,
       cancelled: false,
@@ -1157,34 +1157,44 @@ class TransferManager {
     const end = Math.min(start + t.chunkSize, t.file.size);
     const chunk = t.file.slice(start, end);
 
-    const formData = new FormData();
-    formData.append("session_id", t.sessionId);
-    formData.append("filename", t.filename);
-    formData.append("chunk_index", t.currentChunk);
-    formData.append("total_chunks", t.totalChunks);
-    formData.append("relative_dir", t.relativeDir || "");
-    formData.append("file", chunk);
-
     t.xhr = new XMLHttpRequest();
     const chunkUrl = t.uploadUrl.replace("/api/upload", "/api/upload/chunk");
     t.xhr.open("POST", chunkUrl);
+    t.xhr.setRequestHeader("Content-Type", "application/octet-stream");
+    t.xhr.setRequestHeader("X-Session-Id", t.sessionId);
+    t.xhr.setRequestHeader("X-Filename", encodeURIComponent(t.filename));
+    t.xhr.setRequestHeader("X-Chunk-Index", t.currentChunk.toString());
+    t.xhr.setRequestHeader("X-Total-Chunks", t.totalChunks.toString());
+    if (t.relativeDir) {
+      t.xhr.setRequestHeader("X-Relative-Dir", encodeURIComponent(t.relativeDir));
+    }
     
+    if (!t.lastSpeedUpdate) t.lastSpeedUpdate = Date.now();
+    if (!t.lastLoaded) t.lastLoaded = start;
+
     t.xhr.upload.addEventListener("progress", (e) => {
       if (e.lengthComputable) {
         const now = Date.now();
-        // Throttle updates to every 150ms
-        if (now - t.lastUpdate > 150) {
+        const totalLoaded = start + e.loaded;
+        
+        // Throttle UI updates to every 200ms
+        if (now - t.lastUpdate > 200) {
           t.lastUpdate = now;
-          const totalLoaded = start + e.loaded;
           const pct = Math.round((totalLoaded / t.file.size) * 100);
           t.barEl.style.width = pct + "%";
           
-          const elapsedSec = (now - t.startTime) / 1000;
-          if (elapsedSec > 0.5) {
-            const bps = totalLoaded / elapsedSec;
+          const elapsedSec = (now - t.lastSpeedUpdate) / 1000;
+          if (elapsedSec >= 0.5) {
+            const bytesSinceLast = totalLoaded - t.lastLoaded;
+            const bps = bytesSinceLast / elapsedSec;
             t.speedEl.innerText = `${formatBytes(bps)}/s`;
+            
             const remaining = t.file.size - totalLoaded;
-            t.etaEl.innerText = `ETA: ${Math.round(remaining / bps)}s`;
+            const etaSec = bps > 0 ? Math.round(remaining / bps) : 0;
+            t.etaEl.innerText = `ETA: ${etaSec}s`;
+            
+            t.lastSpeedUpdate = now;
+            t.lastLoaded = totalLoaded;
           }
         }
       }
@@ -1219,7 +1229,7 @@ class TransferManager {
       if (t.pauseBtn) t.pauseBtn.innerText = "Retry";
     });
 
-    t.xhr.send(formData);
+    t.xhr.send(chunk);
   }
 }
 );
@@ -1255,7 +1265,7 @@ class TransferManager {
       t.pauseBtn.innerText = "Retry";
     });
 
-    t.xhr.send(formData);
+    t.xhr.send(chunk);
   }
 }
 
