@@ -1012,7 +1012,6 @@ function renderMeshNodesUI(role, nodes) {
 
 
 // --- Transfer Manager ---
-
 class TransferManager {
   constructor() {
     this.queue = [];
@@ -1039,7 +1038,7 @@ class TransferManager {
 
     const transfer = {
       sessionId, filename, file, uploadUrl, targetName, relativeDir,
-      chunkSize: 50 * 1024 * 1024, // 50MB chunks
+      chunkSize: 50 * 1024 * 1024,
       totalChunks: Math.ceil(file.size / (50 * 1024 * 1024)) || 1,
       currentChunk: 0,
       paused: false,
@@ -1047,7 +1046,9 @@ class TransferManager {
       startTime: 0,
       xhr: null,
       card: null,
-      lastUpdate: 0
+      lastUpdate: 0,
+      lastSpeedUpdate: 0,
+      lastLoaded: 0
     };
 
     this.queue.push(transfer);
@@ -1134,7 +1135,6 @@ class TransferManager {
       if (t.card) t.card.remove();
       this.activeTransfers.delete(sessionId);
     } else {
-      // It might be in the queue
       this.queue = this.queue.filter(x => x.sessionId !== sessionId);
       this.updateQueueHeader();
     }
@@ -1177,7 +1177,6 @@ class TransferManager {
         const now = Date.now();
         const totalLoaded = start + e.loaded;
         
-        // Throttle UI updates to every 200ms
         if (now - t.lastUpdate > 200) {
           t.lastUpdate = now;
           const pct = Math.round((totalLoaded / t.file.size) * 100);
@@ -1204,7 +1203,7 @@ class TransferManager {
       if (t.xhr.status >= 200 && t.xhr.status < 300) {
         const resp = JSON.parse(t.xhr.responseText);
         if (resp.completed) {
-          showToast(`✓ Uploaded ${t.filename}`, "success");
+          showToast(`Uploaded ${t.filename}`, "success");
           if (t.card) t.card.remove();
           this.activeTransfers.delete(sessionId);
           if (resp.file) addSentHistoryItem(resp.file);
@@ -1232,43 +1231,6 @@ class TransferManager {
     t.xhr.send(chunk);
   }
 }
-);
-
-    t.xhr.addEventListener("load", () => {
-      if (t.xhr.status >= 200 && t.xhr.status < 300) {
-        const resp = JSON.parse(t.xhr.responseText);
-        if (resp.completed) {
-          showToast(`✓ Uploaded ${t.filename}`, "success");
-          t.card.remove();
-          this.activeTransfers.delete(sessionId);
-          if (this.activeTransfers.size === 0) {
-            this.container.classList.add("hidden");
-          }
-          if (resp.file) addSentHistoryItem(resp.file);
-          fetchReceivedFiles();
-        } else {
-          t.currentChunk++;
-          this.uploadNextChunk(sessionId);
-        }
-      } else {
-        t.speedEl.innerText = "Error";
-        t.speedEl.style.color = "red";
-        t.paused = true;
-        t.pauseBtn.innerText = "Retry";
-      }
-    });
-
-    t.xhr.addEventListener("error", () => {
-      t.speedEl.innerText = "Error";
-      t.speedEl.style.color = "red";
-      t.paused = true;
-      t.pauseBtn.innerText = "Retry";
-    });
-
-    t.xhr.send(chunk);
-  }
-}
-
 const transferManager = new TransferManager();
 
 function uuidv4() {
