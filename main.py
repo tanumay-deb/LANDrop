@@ -74,7 +74,58 @@ def run_headless(port: int = 5000):
         server.shutdown()
 
 
+def ensure_windows_start_menu_shortcut():
+    """Ensures LANDrop is registered in the Windows Start Menu 'All apps' list."""
+    if sys.platform != "win32":
+        return
+    try:
+        appdata = os.environ.get("APPDATA")
+        if not appdata:
+            return
+        programs_dir = os.path.join(appdata, "Microsoft", "Windows", "Start Menu", "Programs")
+        shortcut_path = os.path.join(programs_dir, "LANDrop.lnk")
+        if os.path.exists(shortcut_path):
+            return
+
+        target = sys.executable
+        args = ""
+        icon_path = ""
+
+        if getattr(sys, "frozen", False):
+            target = sys.executable
+            icon_path = target
+        else:
+            scripts_exe = os.path.join(os.path.dirname(sys.executable), "Scripts", "landrop.exe")
+            if os.path.exists(scripts_exe):
+                target = scripts_exe
+            else:
+                target = sys.executable
+                args = f'"{os.path.abspath(__file__)}"'
+
+            possible_icon = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "icon.ico")
+            if os.path.exists(possible_icon):
+                icon_path = possible_icon
+
+        os.makedirs(programs_dir, exist_ok=True)
+        ps_cmd = (
+            f'$ws = New-Object -ComObject WScript.Shell; '
+            f'$s = $ws.CreateShortcut("{shortcut_path}"); '
+            f'$s.TargetPath = "{target}"; '
+        )
+        if args:
+            ps_cmd += f'$s.Arguments = \'{args}\'; '
+        if icon_path:
+            ps_cmd += f'$s.IconLocation = "{icon_path},0"; '
+        ps_cmd += '$s.Save()'
+
+        import subprocess
+        subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_cmd], capture_output=True, timeout=5)
+    except Exception:
+        pass
+
+
 def main():
+    ensure_windows_start_menu_shortcut()
     parser = argparse.ArgumentParser(description="LANDrop - Wi-Fi File Sharing & Explorer")
     parser.add_argument(
         "--headless",
