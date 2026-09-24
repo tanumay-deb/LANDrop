@@ -1,0 +1,6 @@
+include README.md
+include requirements.txt
+include allow_firewall.bat
+recursive-include templates *
+recursive-include static *
+recursive-include assets *

@@ -18,20 +18,32 @@
 
 ---
 
-## 🛠️ Quick Start
+## 🛠️ Installation & Quick Start
 
-### Option 1: Double-Click (Windows)
-Double-click `start.bat` in this folder.
+### ⚡ Option 1: 1-Line Web Installer (Windows PowerShell - No Python Required)
+Run this single command in PowerShell to automatically download and launch the installer:
+```powershell
+irm https://raw.githubusercontent.com/tanumay-deb/LANDrop/main/install.ps1 | iex
+```
 
-### Option 2: Python Command
+### 📦 Option 2: 1-Line Git Install (pip / pipx)
+Install directly from GitHub into any terminal or environment:
+```bash
+pip install git+https://github.com/tanumay-deb/LANDrop.git
+```
+Then launch LANDrop anytime by typing:
+```bash
+landrop
+```
+
+### 💻 Option 3: Windows Setup Installer (.exe)
+Download and run `LANDrop-v1.2.1-Setup.exe` from [GitHub Releases](https://github.com/tanumay-deb/LANDrop/releases).
+
+### 🐍 Option 4: Run from Source
 ```bash
 python main.py
 ```
-
-### Option 3: Terminal Headless Mode
-```bash
-python main.py --headless
-```
+*(Or headless terminal mode without GUI: `python main.py --headless`)*
 
 ---
 

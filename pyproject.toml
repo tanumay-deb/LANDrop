@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "landrop"
+version = "1.2.1"
+description = "High-Speed Local Wi-Fi File Sharing & Explorer with Multi-Device Mesh"
+readme = "README.md"
+requires-python = ">=3.8"
+authors = [
+    { name = "Tanumay Goswami", email = "tanumaygoswami2001@gmail.com" }
+]
+dependencies = [
+    "flask>=3.0.0",
+    "flask-cors>=4.0.0",
+    "qrcode>=8.0.0",
+    "Pillow>=10.0.0",
+    "PySide6>=6.5.0",
+    "zeroconf>=0.130.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/tanumay-deb/LANDrop"
+Repository = "https://github.com/tanumay-deb/LANDrop"
+Releases = "https://github.com/tanumay-deb/LANDrop/releases"
+
+[project.scripts]
+landrop = "main:main"
+landrop-gui = "main:main"

@@ -27,10 +27,12 @@ htmlcov/
 # Logs
 *.log
 
-# PyInstaller builds
+# PyInstaller builds & packaging
 build/
 dist/
 *.spec
+*.egg-info/
+*.egg
 
 # OS & Editor files
 .DS_Store
