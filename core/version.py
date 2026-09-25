@@ -8,7 +8,7 @@ import re
 import urllib.error
 import urllib.request
 
-APP_VERSION = "1.2.1"
+APP_VERSION = "1.3.0"
 APP_NAME = "LANDrop"
 GITHUB_REPO = "tanumay-deb/LANDrop"
 RELEASES_URL = f"https://github.com/{GITHUB_REPO}/releases"

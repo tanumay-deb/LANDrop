@@ -2,7 +2,7 @@
 ; Bundles LANDrop into a professional Windows Setup Installer
 
 #define MyAppName "LANDrop"
-#define MyAppVersion "1.2.1"
+#define MyAppVersion "1.3.0"
 #define MyAppPublisher "Tanumay Goswami"
 #define MyAppURL "https://github.com/tanumay-deb/LANDrop"
 #define MyAppExeName "LANDrop.exe"

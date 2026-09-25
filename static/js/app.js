@@ -48,6 +48,12 @@ const sentList = document.getElementById("sentList");
 const receivedFilesContainer = document.getElementById("receivedFilesContainer");
 const receivedPathDesc = document.getElementById("receivedPathDesc");
 const btnRefreshReceived = document.getElementById("btnRefreshReceived");
+const incomingTransferCard = document.getElementById("incomingTransferCard");
+const incomingTransfersList = document.getElementById("incomingTransfersList");
+
+// Upload sessions started by THIS device, so we don't also show them as
+// "incoming" (this device already shows its own bar on the Send tab).
+const myUploadSessions = new Set();
 
 // Clipboard DOM Elements
 const clipboardTextarea = document.getElementById("clipboardTextarea");
@@ -845,7 +851,14 @@ function setupUploadEvents() {
 
   folderInput.addEventListener("change", () => {
     if (folderInput.files.length > 0) {
-      uploadFiles(Array.from(folderInput.files));
+      const files = Array.from(folderInput.files);
+      // Preserve the picked folder's structure using each file's relative path.
+      const dirs = files.map((f) => {
+        const rel = f.webkitRelativePath || "";
+        const slash = rel.lastIndexOf("/");
+        return slash > 0 ? rel.slice(0, slash) : "";
+      });
+      uploadFiles(files, dirs);
       folderInput.value = "";
     }
   });
@@ -1018,7 +1031,12 @@ class TransferManager {
     this.activeTransfers = new Map();
     this.container = document.getElementById("transferManagerCard");
     this.list = document.getElementById("activeTransfersList");
-    this.maxConcurrent = 3;
+    // Adaptive concurrency: small files (photos) ride a wide parallel lane,
+    // large files get a narrow lane so they don't clog the Wi-Fi pipe.
+    // There is no cap on how many files may be queued.
+    this.smallFileThreshold = 8 * 1024 * 1024; // 8 MB
+    this.maxSmallConcurrent = 8;
+    this.maxLargeConcurrent = 2;
     
     this.queueHeader = document.createElement("div");
     this.queueHeader.className = "queue-header";
@@ -1050,6 +1068,8 @@ class TransferManager {
       lastSpeedUpdate: 0,
       lastLoaded: 0
     };
+    transfer.isSmall = file.size < this.smallFileThreshold;
+    myUploadSessions.add(sessionId);
 
     this.queue.push(transfer);
     this.updateQueueHeader();
@@ -1067,8 +1087,29 @@ class TransferManager {
   }
 
   processQueue() {
-    while (this.activeTransfers.size < this.maxConcurrent && this.queue.length > 0) {
-      const t = this.queue.shift();
+    while (this.queue.length > 0) {
+      let activeSmall = 0;
+      let activeLarge = 0;
+      for (const t of this.activeTransfers.values()) {
+        if (t.isSmall) activeSmall++;
+        else activeLarge++;
+      }
+      const smallRoom = activeSmall < this.maxSmallConcurrent;
+      const largeRoom = activeLarge < this.maxLargeConcurrent;
+      if (!smallRoom && !largeRoom) break;
+
+      // Start the next queued file whose lane has room (small files may
+      // jump ahead of blocked large ones, and vice versa).
+      let idx = -1;
+      for (let i = 0; i < this.queue.length; i++) {
+        if ((this.queue[i].isSmall && smallRoom) || (!this.queue[i].isSmall && largeRoom)) {
+          idx = i;
+          break;
+        }
+      }
+      if (idx === -1) break;
+
+      const t = this.queue.splice(idx, 1)[0];
       this.updateQueueHeader();
       this.startTransfer(t);
     }
@@ -1128,6 +1169,7 @@ class TransferManager {
   }
 
   cancelTransfer(sessionId) {
+    myUploadSessions.delete(sessionId);
     const t = this.activeTransfers.get(sessionId);
     if (t) {
       t.cancelled = true;
@@ -1203,12 +1245,19 @@ class TransferManager {
       if (t.xhr.status >= 200 && t.xhr.status < 300) {
         const resp = JSON.parse(t.xhr.responseText);
         if (resp.completed) {
-          showToast(`Uploaded ${t.filename}`, "success");
           if (t.card) t.card.remove();
           this.activeTransfers.delete(sessionId);
-          if (resp.file) addSentHistoryItem(resp.file);
-          if (typeof fetchReceivedFiles === 'function') fetchReceivedFiles();
+          myUploadSessions.delete(sessionId);
+          // Keep the queue draining first; UI updates below must never
+          // be able to stall the next transfer if one of them throws.
           this.checkIfDone();
+          try {
+            showToast(`Uploaded ${t.filename}`, "success");
+            if (resp.file) addSentHistoryItem(resp.file);
+            if (typeof fetchReceivedFiles === "function") fetchReceivedFiles();
+          } catch (e) {
+            console.error("Post-upload UI update failed:", e);
+          }
         } else {
           t.currentChunk++;
           this.uploadNextChunk(sessionId);
@@ -1269,6 +1318,7 @@ function uploadFiles(files, relativeDirs = []) {
 
 
 function addSentHistoryItem(fileInfo) {
+  if (!sentList) return;
   const emptySent = sentList.querySelector(".empty-sent");
   if (emptySent) emptySent.remove();
 
@@ -1525,8 +1575,14 @@ function setupSSE() {
     try {
       const data = JSON.parse(e.data);
       if (data.type === "file_received") {
+        removeIncomingProgress(data.session_id);
         showToast(`Incoming file auto-saved: ${data.file.filename}`, "info");
         fetchReceivedFiles();
+      } else if (data.type === "upload_progress") {
+        // Live progress for a transfer arriving from another device.
+        if (!myUploadSessions.has(data.session_id)) {
+          renderIncomingProgress(data);
+        }
       } else if (data.type === "clipboard_updated") {
         if (data.text !== clipboardTextarea.value) {
           isUpdatingFromSSE = true;
@@ -1559,6 +1615,51 @@ function setupSSE() {
   eventSource.onerror = () => {
     // Reconnects automatically
   };
+}
+
+// --- Incoming Transfers (progress for files arriving from other devices) ---
+
+function renderIncomingProgress(data) {
+  if (!incomingTransferCard || !incomingTransfersList || !data.session_id) return;
+  incomingTransferCard.classList.remove("hidden");
+
+  const label = data.relative_dir
+    ? `${data.relative_dir}/${data.filename}`
+    : data.filename || "Incoming file";
+
+  let row = document.getElementById(`incoming-${data.session_id}`);
+  if (!row) {
+    row = document.createElement("div");
+    row.className = "transfer-item";
+    row.id = `incoming-${data.session_id}`;
+    row.innerHTML = `
+      <div class="transfer-info">
+        <div class="transfer-name"></div>
+        <div class="transfer-stats"><span class="incoming-pct">0%</span></div>
+      </div>
+      <div class="transfer-progress">
+        <div class="transfer-bar-bg"><div class="transfer-bar-fill" style="width:0%"></div></div>
+      </div>`;
+    // textContent avoids HTML injection via a crafted filename.
+    row.querySelector(".transfer-name").textContent = label;
+    incomingTransfersList.appendChild(row);
+    showToast(`Receiving ${data.filename || "file"}…`, "info");
+  }
+
+  const pct = Math.min(100, Math.max(0, data.percent || 0));
+  const fill = row.querySelector(".transfer-bar-fill");
+  const pctEl = row.querySelector(".incoming-pct");
+  if (fill) fill.style.width = pct + "%";
+  if (pctEl) pctEl.innerText = `${Math.floor(pct)}% • ${formatBytes(data.received_bytes || 0)}`;
+}
+
+function removeIncomingProgress(sessionId) {
+  if (!sessionId || !incomingTransfersList) return;
+  const row = document.getElementById(`incoming-${sessionId}`);
+  if (row) row.remove();
+  if (incomingTransferCard && incomingTransfersList.children.length === 0) {
+    incomingTransferCard.classList.add("hidden");
+  }
 }
 
 // --- Modals Setup ---

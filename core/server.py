@@ -793,6 +793,25 @@ class LandropServer:
                                 break
                             f.write(data)
 
+            # Broadcast live incoming progress so the host web app can show a
+            # bar for large guest drops.
+            if total_chunks > 1:
+                try:
+                    received_bytes = os.path.getsize(temp_path)
+                except OSError:
+                    received_bytes = 0
+                self.broadcast_event({
+                    "type": "upload_progress",
+                    "session_id": session_id,
+                    "filename": filename,
+                    "relative_dir": relative_dir,
+                    "chunk_index": chunk_index,
+                    "total_chunks": total_chunks,
+                    "percent": round(((chunk_index + 1) / total_chunks) * 100, 1),
+                    "received_bytes": received_bytes,
+                    "from_addr": request.remote_addr,
+                })
+
             if chunk_index == total_chunks - 1:
                 save_dir = os.path.join(config.save_directory, "Guest Drops")
                 os.makedirs(save_dir, exist_ok=True)
@@ -838,6 +857,7 @@ class LandropServer:
                 self.broadcast_event({
                     "type": "file_received",
                     "file": file_info,
+                    "session_id": session_id,
                 })
 
                 return jsonify({"success": True, "completed": True, "file": file_info})
@@ -944,6 +964,25 @@ class LandropServer:
                                 break
                             f.write(data)
 
+            # Broadcast live incoming progress so the host web app (and any
+            # other connected device) can show a bar for large transfers.
+            if total_chunks > 1:
+                try:
+                    received_bytes = os.path.getsize(temp_path)
+                except OSError:
+                    received_bytes = 0
+                self.broadcast_event({
+                    "type": "upload_progress",
+                    "session_id": session_id,
+                    "filename": filename,
+                    "relative_dir": relative_dir,
+                    "chunk_index": chunk_index,
+                    "total_chunks": total_chunks,
+                    "percent": round(((chunk_index + 1) / total_chunks) * 100, 1),
+                    "received_bytes": received_bytes,
+                    "from_addr": request.remote_addr,
+                })
+
             if chunk_index == total_chunks - 1:
                 save_dir = config.save_directory
                 if relative_dir and ".." not in relative_dir and not relative_dir.startswith("/"):
@@ -981,6 +1020,7 @@ class LandropServer:
                 self.broadcast_event({
                     "type": "file_received",
                     "file": file_info,
+                    "session_id": session_id,
                 })
 
                 return jsonify({"success": True, "completed": True, "file": file_info})

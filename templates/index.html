@@ -257,11 +257,11 @@
               </svg>
               <span>Browse Files</span>
             </button>
-            <button class="secondary-btn desktop-only" id="btnSelectFolder">
+            <button class="secondary-btn" id="btnSelectFolder">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
               </svg>
-              <span>Choose Folder</span>
+              <span>Send a Folder</span>
             </button>
           </div>
         </div>
@@ -278,6 +278,13 @@
 
     <!-- TAB 3: RECEIVED FILES -->
     <section class="tab-pane" id="tab-received">
+      <!-- Live incoming transfers from other devices (populated over SSE) -->
+      <div class="transfer-manager hidden" id="incomingTransferCard" style="margin-bottom: 16px;">
+        <div class="transfer-manager-header">
+          <h4 class="subheading">Incoming from other devices</h4>
+        </div>
+        <div id="incomingTransfersList" class="transfers-list"></div>
+      </div>
       <div class="section-card">
         <div class="section-header-flex">
           <div>
